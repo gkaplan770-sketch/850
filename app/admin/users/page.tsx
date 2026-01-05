@@ -1,355 +1,340 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { 
-  Search, Plus, FileSpreadsheet, Trash2, Edit, Phone, MapPin, User, Check, X, Loader2
-} from "lucide-react";
 import { supabase } from '@/lib/supabase';
+import * as XLSX from 'xlsx';
+import { 
+  Search, Plus, Edit2, Trash2, User, Users,
+  MapPin, Hash, Save, X, Upload, FileSpreadsheet, Download 
+} from "lucide-react";
 
-export default function AdminUsersPage() {
-  const [users, setUsers] = useState<any[]>([]);
+interface UserData {
+  id: string;
+  created_at: string;
+  teudat_zehut: string;
+  first_name: string;
+  last_name: string;
+  branch_name: string;
+  phone?: string;
+  spouse_first_name?: string;
+  spouse_phone?: string;
+  role: 'admin' | 'shaliach';
+}
+
+export default function UsersManagement() {
+  const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // טופס הוספה
+  // מודל הוספה/עריכה
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<UserData | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  
+  // טופס
   const [formData, setFormData] = useState({
-    teudat_zehut: '',
     first_name: '',
     last_name: '',
-    phone: '',
+    teudat_zehut: '',
     branch_name: '',
-    email: '',
-    spouse_name: '',
-    spouse_tz: '',
-    spouse_phone: ''
+    phone: '',
+    spouse_first_name: '',
+    spouse_phone: '',
+    role: 'shaliach'
   });
 
-  // שליפת משתמשים
   const fetchUsers = async () => {
-    try {
-      setLoading(true);
-      const { data, error } = await supabase
-        .from('users')
-        .select('*')
-        .order('created_at', { ascending: false });
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .order('branch_name', { ascending: true });
 
-      if (error) throw error;
-      setUsers(data || []);
-    } catch (error) {
-      console.error('Error fetching users:', error);
-    } finally {
-      setLoading(false);
-    }
+    if (!error) setUsers(data || []);
+    setLoading(false);
   };
 
   useEffect(() => {
     fetchUsers();
   }, []);
 
-  // הוספת משתמש חדש
-  const handleCreateUser = async () => {
-    if (!formData.teudat_zehut || !formData.first_name) {
-      alert("חובה למלא ת.ז ושם פרטי");
+  const filteredUsers = users.filter(u => 
+    u.first_name.includes(searchTerm) || 
+    u.last_name.includes(searchTerm) || 
+    u.branch_name.includes(searchTerm) ||
+    u.teudat_zehut.includes(searchTerm)
+  );
+
+  const openModal = (user?: UserData) => {
+    if (user) {
+      setEditingUser(user);
+      setFormData({
+        first_name: user.first_name,
+        last_name: user.last_name,
+        teudat_zehut: user.teudat_zehut,
+        branch_name: user.branch_name,
+        phone: user.phone || '',
+        spouse_first_name: user.spouse_first_name || '',
+        spouse_phone: user.spouse_phone || '',
+        role: user.role
+      });
+    } else {
+      setEditingUser(null);
+      setFormData({
+        first_name: '', last_name: '', teudat_zehut: '', branch_name: '', phone: '', 
+        spouse_first_name: '', spouse_phone: '', role: 'shaliach'
+      });
+    }
+    setIsModalOpen(true);
+  };
+
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.teudat_zehut || !formData.first_name || !formData.branch_name) {
+      alert("נא למלא שדות חובה");
       return;
     }
 
-    setIsSubmitting(true);
     try {
-      const { error } = await supabase.from('users').insert([
-        {
-          teudat_zehut: formData.teudat_zehut,
-          first_name: formData.first_name,
-          last_name: formData.last_name,
-          phone: formData.phone,
-          branch_name: formData.branch_name,
-          email: formData.email,
-          spouse_name: formData.spouse_name,
-          spouse_tz: formData.spouse_tz,
-          spouse_phone: formData.spouse_phone,
-          balance: 0,
-          role: 'shaliach'
-        }
-      ]);
-
-      if (error) throw error;
-
-      alert("השליח נוסף בהצלחה!");
-      setShowAddModal(false);
-      setFormData({
-        teudat_zehut: '', first_name: '', last_name: '', phone: '', branch_name: '',
-        email: '', spouse_name: '', spouse_tz: '', spouse_phone: ''
-      });
-      fetchUsers(); // רענון הטבלה
-
-    } catch (error: any) {
-      console.error('Error creating user:', error);
-      alert("שגיאה ביצירת משתמש: " + error.message);
-    } finally {
-      setIsSubmitting(false);
+      if (editingUser) {
+        const { error } = await supabase.from('users').update(formData).eq('id', editingUser.id);
+        if (error) throw error;
+      } else {
+        const { data: exist } = await supabase.from('users').select('id').eq('teudat_zehut', formData.teudat_zehut).single();
+        if (exist) { alert("ת.ז כבר קיימת!"); return; }
+        const { error } = await supabase.from('users').insert([formData]);
+        if (error) throw error;
+      }
+      setIsModalOpen(false);
+      fetchUsers();
+    } catch (err) {
+      console.error(err);
+      alert("שגיאה בשמירה");
     }
   };
 
-  // מחיקת משתמש
-  const handleDeleteUser = async (id: string) => {
-    if (!confirm("האם אתה בטוח שברצונך למחוק שליח זה? פעולה זו תמחק גם את כל הדיווחים שלו.")) return;
-
+  const handleDelete = async (id: string) => {
+    if (!confirm("למחוק משתמש זה?")) return;
     try {
-      // בגלל ה-CASCADE שהגדרנו ב-SQL, זה ימחק גם את ההודעות והעסקאות שלו
       const { error } = await supabase.from('users').delete().eq('id', id);
-      if (error) throw error;
-      
-      setUsers(prev => prev.filter(user => user.id !== id));
-    } catch (error) {
-      console.error('Error deleting user:', error);
-      alert("שגיאה במחיקה");
-    }
+      if (error) alert("לא ניתן למחוק משתמש עם היסטוריה כספית.");
+      else fetchUsers();
+    } catch (err) { console.error(err); }
   };
 
-  // סינון לפי חיפוש
-  const filteredUsers = users.filter(user => 
-    user.first_name?.includes(searchTerm) || 
-    user.last_name?.includes(searchTerm) || 
-    user.branch_name?.includes(searchTerm) ||
-    user.teudat_zehut?.includes(searchTerm)
-  );
+  // --- ייבוא מאקסל ---
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    
+    const file = e.target.files[0];
+    setIsUploading(true);
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsName = wb.SheetNames[0];
+        const ws = wb.Sheets[wsName];
+        
+        // כאן התיקון: הסרנו את הטייפ מהלולאה
+        const data: any[] = XLSX.utils.sheet_to_json(ws);
+
+        let successCount = 0;
+        let failCount = 0;
+
+        // התיקון כאן: במקום (const row: any of data) כתבנו פשוט (const row of data)
+        for (const row of data) {
+          const newUser = {
+            teudat_zehut: row['teudat_zehut'] || row['id'] || row['תעודת זהות'],
+            first_name: row['first_name'] || row['name'] || row['שם פרטי'],
+            last_name: row['last_name'] || row['family'] || row['שם משפחה'],
+            branch_name: row['branch_name'] || row['branch'] || row['סניף'],
+            phone: row['phone'] || row['tel'] || row['טלפון'],
+            spouse_first_name: row['spouse_first_name'] || row['wife_name'] || row['שם האישה'],
+            spouse_phone: row['spouse_phone'] || row['wife_phone'] || row['טלפון אישה'],
+            role: 'shaliach'
+          };
+
+          if (newUser.teudat_zehut && newUser.first_name) {
+            // בדיקה אם קיים
+            const { data: exist } = await supabase.from('users').select('id').eq('teudat_zehut', newUser.teudat_zehut).single();
+            
+            if (!exist) {
+               const cleanUser = {
+                 ...newUser,
+                 teudat_zehut: String(newUser.teudat_zehut),
+                 phone: newUser.phone ? String(newUser.phone) : '',
+                 spouse_phone: newUser.spouse_phone ? String(newUser.spouse_phone) : ''
+               };
+               
+               const { error } = await supabase.from('users').insert([cleanUser]);
+               if (!error) successCount++;
+               else failCount++;
+            } else {
+              failCount++; 
+            }
+          }
+        }
+
+        alert(`התהליך הסתיים:\n${successCount} משתמשים נוספו בהצלחה.\n${failCount} נכשלו (או שהיו קיימים כבר).`);
+        fetchUsers();
+
+      } catch (err) {
+        console.error(err);
+        alert("שגיאה בקריאת הקובץ. וודא שהוא תקין.");
+      } finally {
+        setIsUploading(false);
+        e.target.value = ''; 
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.json_to_sheet([{
+      teudat_zehut: "123456789",
+      first_name: "ישראל",
+      last_name: "ישראלי",
+      branch_name: "חב״ד לנוער מרכז",
+      phone: "0501234567",
+      spouse_first_name: "רחלי",
+      spouse_phone: "0507654321"
+    }]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template");
+    XLSX.writeFile(wb, "template_shluchim.xlsx");
+  };
 
   return (
-    <div className="space-y-8 pb-20">
+    <div className="space-y-6 pb-20">
       
-      {/* כותרת וכפתורים */}
-      <div className="flex justify-between items-end">
-        <div>
-          <h2 className="text-3xl font-bold text-slate-900">ניהול שלוחים</h2>
-          <p className="text-slate-500 mt-1">סה"כ {users.length} סניפים רשומים במערכת</p>
-        </div>
-        
-        <div className="flex gap-3">
-           <button 
-             className="bg-green-600 hover:bg-green-700 text-white px-5 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-green-600/20 transition-all opacity-50 cursor-not-allowed"
-             title="בקרוב"
-           >
-             <FileSpreadsheet size={20} />
-             ייבוא מאקסל
-           </button>
-           
-           <button 
-             onClick={() => setShowAddModal(true)}
-             className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-slate-900/20 transition-all"
-           >
-             <Plus size={20} />
-             הוסף ידנית
-           </button>
-        </div>
-      </div>
-
-      {/* סרגל חיפוש */}
-      <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex gap-4">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute right-4 top-3.5 text-slate-400" size={20} />
-          <input 
-            type="text" 
-            placeholder="חיפוש לפי שם, סניף, ת.ז..." 
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-12 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none font-medium"
-          />
-        </div>
-      </div>
-
-      {/* טעינה */}
-      {loading && (
-        <div className="text-center py-10">
-           <Loader2 className="animate-spin mx-auto text-blue-600" size={32} />
-           <p className="text-slate-500 mt-2">טוען רשימת שלוחים...</p>
-        </div>
-      )}
-
-      {/* טבלת שליחים */}
-      {!loading && (
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <table className="w-full text-right">
-          <thead className="bg-slate-50 text-slate-500 font-bold border-b border-slate-200 text-sm uppercase">
-            <tr>
-              <th className="px-6 py-4">סניף ושם השליח</th>
-              <th className="px-6 py-4">פרטי האישה</th>
-              <th className="px-6 py-4">תעודות זהות (לכניסה)</th>
-              <th className="px-6 py-4">יצירת קשר</th>
-              <th className="px-6 py-4">מאזן</th>
-              <th className="px-6 py-4">פעולות</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100">
-            {filteredUsers.map((user) => (
-              <tr key={user.id} className="hover:bg-slate-50 transition-colors">
+      {/* כותרת ופעולות */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 flex flex-col xl:flex-row justify-between items-center gap-4">
+         <div>
+            <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
+               <Users className="text-blue-600" /> ניהול שלוחים ומשפחות
+            </h1>
+            <p className="text-slate-500 text-sm mt-1">סה"כ {users.length} משתמשים במערכת</p>
+         </div>
+         
+         <div className="flex flex-col md:flex-row gap-3 w-full xl:w-auto">
+            {/* חיפוש */}
+            <div className="relative flex-1">
+               <input 
+                 type="text" 
+                 placeholder="חיפוש..." 
+                 value={searchTerm}
+                 onChange={(e) => setSearchTerm(e.target.value)}
+                 className="w-full pl-4 pr-10 py-3 rounded-xl bg-slate-50 border border-slate-200 outline-none focus:ring-2 focus:ring-blue-500"
+               />
+               <Search className="absolute left-3 top-3.5 text-slate-400" size={18} />
+            </div>
+            
+            {/* כפתורי אקסל */}
+            <div className="flex gap-2">
+                <button 
+                  onClick={downloadTemplate}
+                  className="bg-green-50 text-green-700 px-4 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-green-100 transition-colors"
+                  title="הורד תבנית אקסל"
+                >
+                  <Download size={20} /> <span className="hidden lg:inline">תבנית</span>
+                </button>
                 
-                {/* עמודה 1: שליח וסניף */}
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-3">
-                    <div className="bg-blue-100 p-2.5 rounded-full text-blue-600">
-                       <User size={20} />
+                <label className="cursor-pointer bg-green-600 hover:bg-green-700 text-white px-4 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-green-600/20 transition-all">
+                   {isUploading ? "טוען..." : <><FileSpreadsheet size={20} /> <span className="hidden lg:inline">טען אקסל</span></>}
+                   <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} disabled={isUploading} className="hidden" />
+                </label>
+            </div>
+
+            <button 
+              onClick={() => openModal()}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg shadow-blue-600/20 transition-all"
+            >
+               <Plus size={20} /> <span className="hidden lg:inline">הוסף ידנית</span>
+            </button>
+         </div>
+      </div>
+
+      {/* טבלה */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden overflow-x-auto">
+         <table className="w-full text-right min-w-[800px]">
+            <thead className="bg-slate-50 text-slate-500 text-xs uppercase font-bold border-b border-slate-100">
+               <tr>
+                  <th className="px-6 py-4">שם השליח/ה</th>
+                  <th className="px-6 py-4">סניף</th>
+                  <th className="px-6 py-4">פרטי קשר (שליח)</th>
+                  <th className="px-6 py-4">פרטי קשר (אישה)</th>
+                  <th className="px-6 py-4">תעודת זהות</th>
+                  <th className="px-6 py-4">פעולות</th>
+               </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-50">
+               {filteredUsers.map((u) => (
+                  <tr key={u.id} className="hover:bg-slate-50 transition-colors">
+                     <td className="px-6 py-4">
+                        <div className="font-bold text-slate-900">{u.first_name} {u.last_name}</div>
+                        {u.spouse_first_name && <div className="text-xs text-slate-500 mt-0.5">רעייה: {u.spouse_first_name}</div>}
+                     </td>
+                     <td className="px-6 py-4">
+                        <div className="flex items-center gap-1 bg-blue-50 text-blue-700 px-2 py-1 rounded w-fit text-sm font-medium">
+                           <MapPin size={14} /> {u.branch_name}
+                        </div>
+                     </td>
+                     <td className="px-6 py-4 text-sm text-slate-600">{u.phone || '-'}</td>
+                     <td className="px-6 py-4 text-sm text-slate-600">{u.spouse_phone || '-'}</td>
+                     <td className="px-6 py-4 font-mono text-slate-500 text-sm">{u.teudat_zehut}</td>
+                     <td className="px-6 py-4">
+                        <div className="flex gap-2">
+                           <button onClick={() => openModal(u)} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg"><Edit2 size={18} /></button>
+                           <button onClick={() => handleDelete(u.id)} className="p-2 hover:bg-red-50 text-red-600 rounded-lg"><Trash2 size={18} /></button>
+                        </div>
+                     </td>
+                  </tr>
+               ))}
+            </tbody>
+         </table>
+      </div>
+
+      {/* מודל */}
+      {isModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
+           <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+              <div className="bg-slate-50 p-6 border-b flex justify-between items-center">
+                 <h2 className="font-bold text-lg">{editingUser ? 'עריכת פרטים' : 'הוספת שליח חדש'}</h2>
+                 <button onClick={() => setIsModalOpen(false)} className="p-2 hover:bg-slate-200 rounded-full"><X size={20} /></button>
+              </div>
+              <form onSubmit={handleSave} className="p-8 overflow-y-auto">
+                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* פרטי השליח */}
+                    <div className="space-y-4">
+                       <h3 className="font-bold text-blue-600 border-b pb-2">פרטי השליח</h3>
+                       <div><label className="text-xs font-bold text-slate-500">שם פרטי *</label><input required value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500" /></div>
+                       <div><label className="text-xs font-bold text-slate-500">שם משפחה *</label><input required value={formData.last_name} onChange={e => setFormData({...formData, last_name: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500" /></div>
+                       <div><label className="text-xs font-bold text-slate-500">תעודת זהות (כניסה) *</label><input required value={formData.teudat_zehut} onChange={e => setFormData({...formData, teudat_zehut: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500 font-mono" /></div>
+                       <div><label className="text-xs font-bold text-slate-500">טלפון נייד</label><input value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500" /></div>
                     </div>
-                    <div>
-                       <div className="font-bold text-slate-900 text-lg">{user.first_name} {user.last_name}</div>
-                       <div className="text-sm text-slate-500 flex items-center gap-1">
-                          <MapPin size={12} /> {user.branch_name}
+                    
+                    {/* פרטי האישה והסניף */}
+                    <div className="space-y-4">
+                       <h3 className="font-bold text-pink-600 border-b pb-2">פרטי האישה והסניף</h3>
+                       <div><label className="text-xs font-bold text-slate-500">שם האישה</label><input value={formData.spouse_first_name} onChange={e => setFormData({...formData, spouse_first_name: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500" /></div>
+                       <div><label className="text-xs font-bold text-slate-500">טלפון האישה</label><input value={formData.spouse_phone} onChange={e => setFormData({...formData, spouse_phone: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500" /></div>
+                       <div className="pt-2"><label className="text-xs font-bold text-slate-500">שם הסניף *</label><input required value={formData.branch_name} onChange={e => setFormData({...formData, branch_name: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500 bg-slate-50" /></div>
+                       <div>
+                          <label className="text-xs font-bold text-slate-500">תפקיד</label>
+                          <select value={formData.role} onChange={(e: any) => setFormData({...formData, role: e.target.value})} className="w-full p-3 rounded-xl border bg-white">
+                             <option value="shaliach">שליח</option>
+                             <option value="admin">מנהל</option>
+                          </select>
                        </div>
                     </div>
-                  </div>
-                </td>
-
-                {/* עמודה 2: אישה */}
-                <td className="px-6 py-4">
-                   <div className="font-bold text-slate-700">{user.spouse_name || '-'}</div>
-                   <div className="text-xs text-slate-400 mt-0.5 dir-ltr text-right">{user.spouse_phone}</div>
-                </td>
-
-                {/* עמודה 3: ת.ז */}
-                <td className="px-6 py-4">
-                   <div className="space-y-1">
-                      <div className="text-xs bg-slate-100 px-2 py-0.5 rounded w-fit text-slate-600">
-                         שלו: <span className="font-mono font-bold">{user.teudat_zehut}</span>
-                      </div>
-                      {user.spouse_tz && (
-                        <div className="text-xs bg-slate-100 px-2 py-0.5 rounded w-fit text-slate-600">
-                           שלה: <span className="font-mono font-bold">{user.spouse_tz}</span>
-                        </div>
-                      )}
-                   </div>
-                </td>
-
-                {/* עמודה 4: קשר */}
-                <td className="px-6 py-4">
-                  <div className="text-sm space-y-1">
-                     <div className="flex items-center gap-2 text-slate-600">
-                        <Phone size={14} /> {user.phone}
-                     </div>
-                     <div className="text-xs text-slate-400">{user.email}</div>
-                  </div>
-                </td>
-
-                {/* עמודה 5: מאזן */}
-                <td className="px-6 py-4">
-                  <span className={`text-lg font-black dir-ltr ${user.balance >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-                    ₪{user.balance?.toLocaleString()}
-                  </span>
-                </td>
-
-                {/* עמודה 6: פעולות */}
-                <td className="px-6 py-4">
-                  <div className="flex gap-2">
-                    <button className="p-2 hover:bg-blue-50 text-slate-400 hover:text-blue-600 rounded-xl transition-colors" title="ערוך פרטים">
-                      <Edit size={18} />
-                    </button>
-                    <button 
-                      onClick={() => handleDeleteUser(user.id)}
-                      className="p-2 hover:bg-red-50 text-slate-400 hover:text-red-600 rounded-xl transition-colors" 
-                      title="מחק שליח"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      )}
-
-
-      {/* --- מודל הוספה ידנית (מחובר ל-DB) --- */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
-             <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50">
-                <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                   <User className="text-blue-600" />
-                   הוספת שליח חדש
-                </h3>
-                <button onClick={() => setShowAddModal(false)} className="p-2 hover:bg-slate-200 rounded-full"><X size={20}/></button>
-             </div>
-             
-             <div className="p-8 overflow-y-auto">
-                <div className="grid grid-cols-2 gap-8">
-                   {/* צד שליח */}
-                   <div className="space-y-4">
-                      <h4 className="font-bold text-blue-600 border-b border-blue-100 pb-2">פרטי השליח</h4>
-                      <div>
-                         <label className="block text-sm font-bold text-slate-700 mb-1">מספר תעודת זהות *</label>
-                         <input 
-                           type="text" required
-                           value={formData.teudat_zehut}
-                           onChange={(e) => setFormData({...formData, teudat_zehut: e.target.value})}
-                           className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500" 
-                         />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                         <div>
-                            <label className="block text-sm font-bold text-slate-700 mb-1">שם פרטי *</label>
-                            <input type="text" required value={formData.first_name} onChange={(e) => setFormData({...formData, first_name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500" />
-                         </div>
-                         <div>
-                            <label className="block text-sm font-bold text-slate-700 mb-1">שם משפחה *</label>
-                            <input type="text" required value={formData.last_name} onChange={(e) => setFormData({...formData, last_name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500" />
-                         </div>
-                      </div>
-                      <div>
-                         <label className="block text-sm font-bold text-slate-700 mb-1">טלפון נייד</label>
-                         <input type="text" value={formData.phone} onChange={(e) => setFormData({...formData, phone: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500" />
-                      </div>
-                   </div>
-
-                   {/* צד אישה */}
-                   <div className="space-y-4">
-                      <h4 className="font-bold text-pink-600 border-b border-pink-100 pb-2">פרטי האישה (השליחה)</h4>
-                      <div>
-                         <label className="block text-sm font-bold text-slate-700 mb-1">מספר תעודת זהות</label>
-                         <input type="text" value={formData.spouse_tz} onChange={(e) => setFormData({...formData, spouse_tz: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-pink-500" />
-                      </div>
-                      <div>
-                         <label className="block text-sm font-bold text-slate-700 mb-1">שם פרטי</label>
-                         <input type="text" value={formData.spouse_name} onChange={(e) => setFormData({...formData, spouse_name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-pink-500" />
-                      </div>
-                      <div>
-                         <label className="block text-sm font-bold text-slate-700 mb-1">טלפון נייד</label>
-                         <input type="text" value={formData.spouse_phone} onChange={(e) => setFormData({...formData, spouse_phone: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-pink-500" />
-                      </div>
-                   </div>
-                </div>
-
-                <div className="mt-8 space-y-4">
-                   <h4 className="font-bold text-slate-800 border-b border-slate-100 pb-2">פרטי סניף וכללי</h4>
-                   <div className="grid grid-cols-2 gap-8">
-                      <div>
-                         <label className="block text-sm font-bold text-slate-700 mb-1">שם הסניף</label>
-                         <input type="text" value={formData.branch_name} onChange={(e) => setFormData({...formData, branch_name: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-slate-500" />
-                      </div>
-                      <div>
-                         <label className="block text-sm font-bold text-slate-700 mb-1">אימייל ראשי</label>
-                         <input type="email" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-slate-500" />
-                      </div>
-                   </div>
-                </div>
-
-                <div className="mt-8 pt-6 border-t border-slate-100 flex justify-end gap-3">
-                   <button onClick={() => setShowAddModal(false)} className="px-6 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition-colors">ביטול</button>
-                   <button 
-                     onClick={handleCreateUser}
-                     disabled={isSubmitting}
-                     className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl font-bold shadow-lg transition-all flex items-center gap-2"
-                   >
-                      {isSubmitting ? <Loader2 className="animate-spin" /> : <Check size={20} />}
-                      שמור שליח במערכת
-                   </button>
-                </div>
-             </div>
-          </div>
+                 </div>
+                 <button type="submit" className="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-xl shadow-lg">שמור פרטים</button>
+              </form>
+           </div>
         </div>
       )}
-
     </div>
   );
 }

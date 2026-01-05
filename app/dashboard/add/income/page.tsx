@@ -1,293 +1,293 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
-import { ArrowRight, Check, Users, Camera, UploadCloud } from "lucide-react";
+import { 
+  ArrowRight, Check, Users, Camera, 
+  Calendar, FileText, ChevronDown, Smile 
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
-export default function ActivityReportPage() {
+interface ActivityType {
+  id: string;
+  name: string;
+  category: string;
+  tiers: { min: number; max: number; amount: number }[];
+}
+
+export default function IncomeReportPage() {
   const router = useRouter();
-  const [branchName, setBranchName] = useState('טוען...');
   const [userId, setUserId] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
   
-  // נתונים לטופס
-  const [formData, setFormData] = useState({
-    targetAudience: 'boys',
-    participantsCount: '',
-    activityDate: new Date().toISOString().split('T')[0],
-    activityDay: '',
-    activityType: '',
-  });
+  // נתונים מהשרת
+  const [activityTypes, setActivityTypes] = useState<ActivityType[]>([]);
+  const [loadingTypes, setLoadingTypes] = useState(true);
 
-  const [selectedImage, setSelectedImage] = useState<File | null>(null);
+  // טופס
+  const [selectedActId, setSelectedActId] = useState('');
+  const [participants, setParticipants] = useState('');
+  const [boysCount, setBoysCount] = useState('');
+  const [girlsCount, setGirlsCount] = useState('');
+  const [description, setDescription] = useState('');
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
-  const daysOfWeek = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'מוצ"ש'];
-  const activityTypes = [
-    { id: 'lesson', name: 'שיעור שבועי' },
-    { id: 'event', name: 'פעילות שיא / מסיבה' },
-    { id: 'trip', name: 'טיול' },
-    { id: 'farbrengen', name: 'התוועדות' },
-  ];
+  // חישובים
+  const [calculatedReward, setCalculatedReward] = useState(0);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
 
   useEffect(() => {
-    // שליפת פרטי משתמש מהזיכרון
-    const storedBranch = localStorage.getItem('user_branch') || 'סניף לא ידוע';
-    const storedUserId = localStorage.getItem('user_id');
+    const id = localStorage.getItem('user_id');
+    if (!id) { router.push('/'); return; }
+    setUserId(id);
+    fetchActivityTypes();
+  }, []);
+
+  // שליפת סוגי הפעילות מהמנהל
+  const fetchActivityTypes = async () => {
+    const { data } = await supabase.from('activity_types').select('*').order('name');
+    setActivityTypes(data || []);
+    setLoadingTypes(false);
+  };
+
+  // --- המוח: חישוב אוטומטי של הסכום ---
+  useEffect(() => {
+    const count = Number(participants);
+    const act = activityTypes.find(a => a.id === selectedActId);
     
-    if (!storedUserId) {
-      router.push('/'); // אם אין משתמש מחובר, זרוק אותו החוצה
+    if (!act || count <= 0 || !act.tiers) {
+      setCalculatedReward(0);
       return;
     }
 
-    setBranchName(storedBranch);
-    setUserId(storedUserId);
-  }, []);
-
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedImage(e.target.files[0]);
+    // חיפוש המדרגה המתאימה
+    const tier = act.tiers.find(t => count >= t.min && count <= t.max);
+    
+    if (tier) {
+      setCalculatedReward(tier.amount);
+    } else {
+      // אם לא נמצאה מדרגה (למשל כמות גדולה מדי שלא הוגדרה), אפשר לתת 0 או את המקסימום
+      // כאן ניתן 0 ונודיע למשתמש
+      setCalculatedReward(0);
     }
+
+  }, [participants, selectedActId, activityTypes]);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) setImageFile(e.target.files[0]);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!userId) return;
+    if (!selectedActId || !imageFile) { alert("חובה לבחור פעילות ולהעלות תמונה"); return; }
+    
+    // בדיקת תקינות מספרים
+    const total = Number(participants);
+    const boys = Number(boysCount);
+    const girls = Number(girlsCount);
+
+    if (boys + girls > total) {
+       alert("שגיאה: מספר הבנים והבנות ביחד גדול מסך המשתתפים");
+       return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      let imageUrl = null;
+      // 1. העלאת תמונה
+      const fileExt = imageFile.name.split('.').pop();
+      const fileName = `act_${userId}_${Date.now()}.${fileExt}`;
+      const { error: uploadError } = await supabase.storage.from('images').upload(fileName, imageFile);
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
 
-      // 1. העלאת תמונה (אם נבחרה)
-      if (selectedImage) {
-        const fileExt = selectedImage.name.split('.').pop();
-        const fileName = `${userId}_${Date.now()}.${fileExt}`; // שם ייחודי לקובץ
-        
-        const { error: uploadError } = await supabase.storage
-          .from('images')
-          .upload(fileName, selectedImage);
-
-        if (uploadError) throw uploadError;
-
-        // קבלת הקישור הציבורי לתמונה
-        const { data: publicUrlData } = supabase.storage
-          .from('images')
-          .getPublicUrl(fileName);
-          
-        imageUrl = publicUrlData.publicUrl;
-      }
-
-      // 2. שמירת הנתונים בטבלה
-      const { error: insertError } = await supabase
-        .from('transactions')
-        .insert([
-          {
-            user_id: userId,
-            type: 'income',
-            title: `${getActivityName(formData.activityType)} - ${formData.activityDay}`,
-            amount: 0, // הסכום יחושב ע"י המנהל בעת האישור
-            date: formData.activityDate,
-            status: 'pending',
-            file_url: imageUrl,
-            // שמירת כל הפרטים הנוספים בתוך עמודת JSON
-            details: {
-              audience: formData.targetAudience,
-              participants: Number(formData.participantsCount),
-              activity_type: formData.activityType,
-              day: formData.activityDay
-            }
-          }
-        ]);
+      // 2. שמירת הדיווח
+      const actName = activityTypes.find(a => a.id === selectedActId)?.name || 'פעילות';
+      
+      const { error: insertError } = await supabase.from('transactions').insert([{
+        user_id: userId,
+        type: 'income', // הכנסה
+        title: actName,
+        amount: calculatedReward, // הסכום שחושב אוטומטית
+        date: date,
+        status: 'pending', // ממתין לאישור מנהל
+        file_url: urlData.publicUrl,
+        details: {
+          activity_id: selectedActId,
+          participants: total,
+          boys: boys,
+          girls: girls,
+          notes: description,
+          calculated_by_system: true
+        }
+      }]);
 
       if (insertError) throw insertError;
-
-      // סיום בהצלחה
+      
       setIsSubmitting(false);
-      setShowSuccessPopup(true);
+      setShowSuccess(true);
 
-    } catch (error) {
-      console.error('Error submitting report:', error);
-      alert('אירעה שגיאה בשליחת הדיווח. נסה שנית.');
+    } catch (err) {
+      console.error(err);
+      alert("שגיאה בשליחת הדיווח");
       setIsSubmitting(false);
     }
   };
 
-  // פונקציית עזר להמרת קוד פעילות לשם בעברית
-  const getActivityName = (id: string) => {
-    const activity = activityTypes.find(a => a.id === id);
-    return activity ? activity.name : id;
-  };
-
   return (
-    <div className="min-h-screen bg-slate-50 p-4 font-sans" dir="rtl">
-      <div className="max-w-xl mx-auto pb-20">
+    <div className="min-h-screen bg-slate-50 font-sans pb-20" dir="rtl">
+      
+      {/* כותרת */}
+      <div className="bg-white p-5 shadow-sm border-b border-slate-100 sticky top-0 z-10 flex items-center gap-3">
+         <Link href="/dashboard" className="w-8 h-8 flex items-center justify-center bg-slate-100 rounded-full text-slate-600">
+            <ArrowRight size={18} />
+         </Link>
+         <h1 className="text-lg font-black text-slate-800">דיווח על פעילות</h1>
+      </div>
+
+      <div className="p-5 max-w-xl mx-auto space-y-6">
         
-        <Link href="/dashboard" className="inline-flex items-center gap-2 text-slate-500 font-medium hover:text-blue-600 mb-6 transition-colors px-2">
-          <ArrowRight size={20} />
-          חזרה
-        </Link>
-
-        <div className="bg-white rounded-[2rem] shadow-xl shadow-slate-200/50 overflow-hidden border border-slate-100">
-          
-          <div className="p-8 bg-gradient-to-r from-blue-600 to-blue-500 text-white relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-20 h-20 bg-white/10 rounded-full -translate-x-1/2 -translate-y-1/2 blur-xl"></div>
-            <h1 className="text-2xl font-bold relative z-10">עדכון פעילות</h1>
-            <p className="text-blue-100 text-sm mt-1 relative z-10">{branchName}</p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="p-6 space-y-8">
-            
-            {/* בנים / בנות */}
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-3 px-1">קהל יעד</label>
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  type="button"
-                  onClick={() => setFormData({...formData, targetAudience: 'boys'})}
-                  className={`py-5 rounded-2xl font-bold text-lg transition-all shadow-sm border ${
-                    formData.targetAudience === 'boys' 
-                      ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border-transparent shadow-blue-500/30 ring-2 ring-offset-2 ring-blue-500' 
-                      : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-                  }`}
-                >
-                  בנים
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setFormData({...formData, targetAudience: 'girls'})}
-                  className={`py-5 rounded-2xl font-bold text-lg transition-all shadow-sm border ${
-                    formData.targetAudience === 'girls' 
-                      ? 'bg-gradient-to-br from-pink-500 to-pink-600 text-white border-transparent shadow-pink-500/30 ring-2 ring-offset-2 ring-pink-500' 
-                      : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
-                  }`}
-                >
-                  בנות
-                </button>
-              </div>
-            </div>
-
-            {/* כמות משתתפים */}
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2 px-1">כמות משתתפים</label>
-              <div className="relative">
-                <input 
-                  type="number" 
-                  required
-                  min="1"
-                  value={formData.participantsCount}
-                  onChange={(e) => setFormData({...formData, participantsCount: e.target.value})}
-                  className="block w-full px-4 py-4 bg-slate-50/50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none font-bold text-xl text-center shadow-inner"
-                  placeholder="0"
-                />
-              </div>
-            </div>
-
-            {/* תאריך ויום */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2 px-1">תאריך</label>
-                <input 
-                  type="date" 
-                  required
-                  value={formData.activityDate}
-                  onChange={(e) => setFormData({...formData, activityDate: e.target.value})}
-                  className="block w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 font-medium"
-                />
-              </div>
+        <form onSubmit={handleSubmit} className="space-y-6">
+           
+           {/* כרטיס ראשי: בחירת פעילות וכמות */}
+           <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4">
               
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2 px-1">יום</label>
-                <select 
-                  required
-                  value={formData.activityDay}
-                  onChange={(e) => setFormData({...formData, activityDay: e.target.value})}
-                  className="block w-full px-4 py-3.5 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 font-medium"
-                >
-                  <option value="">בחר...</option>
-                  {daysOfWeek.map(day => (
-                    <option key={day} value={day}>{day}</option>
-                  ))}
-                </select>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block">איזה פעילות עשית?</label>
+                 <div className="relative">
+                    <select 
+                      value={selectedActId}
+                      onChange={(e) => setSelectedActId(e.target.value)}
+                      className="w-full p-4 bg-slate-50 rounded-2xl border-none outline-none font-bold text-slate-800 appearance-none"
+                    >
+                       <option value="">בחר מהרשימה...</option>
+                       {activityTypes.map(a => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                       ))}
+                    </select>
+                    <ChevronDown className="absolute left-4 top-4 text-slate-400 pointer-events-none" size={20} />
+                 </div>
               </div>
-            </div>
 
-            {/* סוג הפעילות */}
-            <div>
-              <label className="block text-sm font-bold text-slate-700 mb-2 px-1">סוג הפעילות</label>
-              <select 
-                required
-                value={formData.activityType}
-                onChange={(e) => setFormData({...formData, activityType: e.target.value})}
-                className="block w-full px-4 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none text-slate-700 font-medium text-lg"
-              >
-                <option value="">בחר סוג פעילות...</option>
-                {activityTypes.map(type => (
-                  <option key={type.id} value={type.id}>{type.name}</option>
-                ))}
-              </select>
-            </div>
+              <div>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block">מתי זה קרה?</label>
+                 <div className="relative">
+                    <input 
+                      type="date" 
+                      required
+                      value={date}
+                      onChange={(e) => setDate(e.target.value)}
+                      className="w-full p-4 bg-slate-50 rounded-2xl border-none outline-none font-bold text-slate-800"
+                    />
+                    <Calendar className="absolute left-4 top-4 text-slate-400 pointer-events-none" size={20} />
+                 </div>
+              </div>
 
-            {/* העלאת תמונה */}
-            <div>
-               <label className="block text-sm font-bold text-slate-700 mb-2 px-1">תמונה (רשות)</label>
-               <div className="relative">
-                  <input 
-                     type="file" 
-                     accept="image/*"
-                     onChange={handleImageChange}
-                     className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                  />
-                  <div className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all bg-white/50 ${selectedImage ? 'border-green-400 bg-green-50' : 'border-slate-200 hover:bg-slate-50'}`}>
-                     {selectedImage ? (
-                        <div className="text-green-600 flex flex-col items-center">
-                           <Check size={32} />
-                           <span className="font-bold mt-2">{selectedImage.name}</span>
-                           <span className="text-xs">לחץ להחלפה</span>
-                        </div>
-                     ) : (
-                        <div className="flex flex-col items-center text-slate-500">
-                           <div className="bg-blue-50 w-12 h-12 rounded-full flex items-center justify-center mb-2 text-blue-600">
-                              <Camera size={24} />
-                           </div>
-                           <span className="text-sm font-medium">לחץ לצילום או בחירת תמונה</span>
-                        </div>
-                     )}
-                  </div>
-               </div>
-            </div>
+              <div className="pt-2">
+                 <label className="text-xs font-bold text-slate-500 mb-1 block">כמה השתתפו סה"כ?</label>
+                 <div className="relative">
+                    <input 
+                      type="number" 
+                      required
+                      placeholder="0"
+                      value={participants}
+                      onChange={(e) => setParticipants(e.target.value)}
+                      className="w-full p-4 pl-12 rounded-2xl border-2 border-slate-100 outline-none focus:border-blue-500 font-black text-2xl"
+                    />
+                    <Users className="absolute left-4 top-5 text-slate-300 pointer-events-none" size={24} />
+                 </div>
+              </div>
 
-            <button 
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-4 rounded-2xl shadow-xl shadow-slate-900/20 transition-all flex items-center justify-center gap-3 active:scale-[0.98] text-lg mt-4"
-            >
-              {isSubmitting ? "שולח נתונים..." : "שמור ושלח דיווח"}
-            </button>
+              {/* פירוט בנים בנות */}
+              <div className="grid grid-cols-2 gap-4">
+                 <div>
+                    <label className="text-xs font-bold text-slate-400 mb-1 block">מספר בנים</label>
+                    <input 
+                      type="number" 
+                      placeholder="0"
+                      value={boysCount}
+                      onChange={(e) => setBoysCount(e.target.value)}
+                      className="w-full p-3 rounded-xl bg-blue-50/50 border border-blue-100 text-center font-bold outline-none focus:bg-white focus:border-blue-400"
+                    />
+                 </div>
+                 <div>
+                    <label className="text-xs font-bold text-slate-400 mb-1 block">מספר בנות</label>
+                    <input 
+                      type="number" 
+                      placeholder="0"
+                      value={girlsCount}
+                      onChange={(e) => setGirlsCount(e.target.value)}
+                      className="w-full p-3 rounded-xl bg-pink-50/50 border border-pink-100 text-center font-bold outline-none focus:bg-white focus:border-pink-400"
+                    />
+                 </div>
+              </div>
 
-          </form>
-        </div>
+              {/* תצוגת הסכום המחושב */}
+              <div className={`p-4 rounded-2xl text-center transition-all ${calculatedReward > 0 ? 'bg-green-500 text-white shadow-lg shadow-green-500/20' : 'bg-slate-100 text-slate-400'}`}>
+                  <div className="text-xs font-medium opacity-80">סכום לזיכוי (לפי מחירון)</div>
+                  <div className="text-3xl font-black mt-1">₪{calculatedReward}</div>
+                  {calculatedReward === 0 && participants !== '' && Number(participants) > 0 && (
+                      <div className="text-[10px] mt-1 text-red-100 font-bold">לא נמצאה מדרגת תשלום לכמות זו</div>
+                  )}
+              </div>
+           </div>
+
+           {/* כרטיס תמונה והערות */}
+           <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4">
+              <div>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block">תמונה מהפעילות (חובה)</label>
+                 <div className="relative">
+                    <input type="file" required accept="image/*" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                    <div className={`border-2 border-dashed rounded-2xl p-6 text-center transition-colors ${imageFile ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-400'}`}>
+                       <Camera className={`mx-auto mb-2 ${imageFile ? 'text-blue-600' : 'text-slate-300'}`} size={32} />
+                       <p className={`text-sm font-bold ${imageFile ? 'text-blue-700' : 'text-slate-500'}`}>
+                          {imageFile ? 'התמונה נבחרה!' : 'לחץ לצילום / העלאה'}
+                       </p>
+                    </div>
+                 </div>
+              </div>
+
+              <div>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block">איך היה? (תיאור קצר)</label>
+                 <textarea 
+                   rows={3}
+                   value={description}
+                   onChange={(e) => setDescription(e.target.value)}
+                   className="w-full p-4 rounded-2xl border border-slate-200 outline-none focus:border-blue-500 resize-none text-sm"
+                   placeholder="היה מוצלח מאוד, הגיעו חבר'ה חדשים..."
+                 />
+              </div>
+           </div>
+
+           <button 
+             type="submit" 
+             disabled={isSubmitting || calculatedReward === 0} 
+             className="w-full bg-slate-900 text-white font-black py-4 rounded-2xl shadow-xl shadow-slate-900/20 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
+           >
+              {isSubmitting ? "שולח..." : "שלח דיווח"}
+           </button>
+        </form>
       </div>
 
       {/* פופאפ הצלחה */}
-      {showSuccessPopup && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in">
-          <div className="bg-white rounded-[2.5rem] p-8 w-full max-w-sm text-center shadow-2xl animate-in zoom-in-95">
-            <div className="w-20 h-20 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-6">
-              <Check size={40} strokeWidth={3} />
-            </div>
-            <h2 className="text-2xl font-bold text-slate-900 mb-2">הדיווח נשלח!</h2>
-            <p className="text-slate-500 mb-8">הפרטים נקלטו ויועברו לבדיקת המנהל.</p>
-            <button 
-              onClick={() => router.push('/dashboard')}
-              className="w-full bg-slate-900 text-white py-4 rounded-2xl font-bold text-lg"
-            >
-              חזור לדף הבית
-            </button>
-          </div>
+      {showSuccess && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-6 animate-in fade-in">
+           <div className="bg-white w-full max-w-sm p-8 rounded-[2rem] text-center shadow-2xl animate-in zoom-in-95">
+              <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 text-green-600">
+                 <Smile size={40} strokeWidth={3} />
+              </div>
+              <h2 className="text-2xl font-black text-slate-900 mb-2">כל הכבוד!</h2>
+              <p className="text-slate-500 mb-6">
+                 הדיווח התקבל ויועבר לאישור המנהל.<br/>
+                 סכום של <b>₪{calculatedReward}</b> יכנס ליתרה לאחר האישור.
+              </p>
+              <button onClick={() => router.push('/dashboard')} className="w-full py-3 bg-slate-900 text-white font-bold rounded-xl">חזור למסך הראשי</button>
+           </div>
         </div>
       )}
+
     </div>
   );
 }
