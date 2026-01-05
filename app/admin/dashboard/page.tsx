@@ -4,7 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { 
   Check, X, Users, DollarSign, Eye, Calendar
 } from "lucide-react";
-import { supabase } from '@/lib/supabase';
+
+// --- התיקון נמצא בשורה הזו ---
+// במקום @/lib/supabase השתמשנו בנתיב מלא
+import { supabase } from '../../../lib/supabase';
 
 export default function AdminDashboard() {
   const [requests, setRequests] = useState<any[]>([]);
@@ -74,7 +77,6 @@ export default function AdminDashboard() {
     });
 
   // חישוב סכום לאישור (עבור הכנסות שעדיין אין להן סכום סופי)
-  // הערה: בעתיד זה יחובר להגדרות הדינמיות שבנינו
   const calculateSuggestedAmount = (participants: number) => {
     if (!participants) return 0;
     if (participants < 20) return 200;
@@ -86,12 +88,9 @@ export default function AdminDashboard() {
     if (!selectedRequest) return;
     
     try {
-      // אם זו הכנסה, אנחנו צריכים לקבוע את הסכום הסופי
-      // אם זו הוצאה, הסכום כבר קיים
       let finalAmount = selectedRequest.amount;
       
       if (selectedRequest.type === 'income') {
-         // חישוב אוטומטי (זמני - עד שנחבר להגדרות)
          finalAmount = calculateSuggestedAmount(selectedRequest.details.participants);
       }
 
@@ -100,18 +99,13 @@ export default function AdminDashboard() {
         .from('transactions')
         .update({ 
           status: 'approved',
-          amount: finalAmount // עדכון הסכום הסופי
+          amount: finalAmount 
         })
         .eq('id', selectedRequest.id);
 
       if (error) throw error;
 
       alert("הבקשה אושרה בהצלחה!");
-      
-      // עדכון היתרה של המשתמש (בונוס - אופציונלי לשלב זה)
-      // כאן אפשר להוסיף קריאה ל-RPC או עדכון ידני לטבלת users
-      
-      // רענון המסך
       setRequests(prev => prev.filter(r => r.id !== selectedRequest.id));
       closeModal();
 
@@ -128,7 +122,6 @@ export default function AdminDashboard() {
     }
 
     try {
-      // עדכון הסטטוס ל-rejected ושמירת הסיבה בתוך ה-details
       const updatedDetails = {
         ...selectedRequest.details,
         rejection_reason: rejectionReason
@@ -273,21 +266,21 @@ export default function AdminDashboard() {
             <div className="w-full md:w-1/2 bg-slate-100 p-8 flex items-center justify-center border-l border-slate-200">
                {selectedRequest.file_url ? (
                   <div className="text-center w-full h-full">
-                     <img 
-                      src={selectedRequest.file_url} 
-                      alt="אסמכתא" 
-                      className="max-h-[60vh] object-contain rounded-lg shadow-md mx-auto"
-                     />
-                     <a href={selectedRequest.file_url} target="_blank" className="text-blue-600 text-sm font-bold mt-4 block hover:underline">
-                        פתח תמונה בחלון חדש
-                     </a>
+                      <img 
+                       src={selectedRequest.file_url} 
+                       alt="אסמכתא" 
+                       className="max-h-[60vh] object-contain rounded-lg shadow-md mx-auto"
+                      />
+                      <a href={selectedRequest.file_url} target="_blank" className="text-blue-600 text-sm font-bold mt-4 block hover:underline">
+                         פתח תמונה בחלון חדש
+                      </a>
                   </div>
                ) : (
                   <div className="text-center text-slate-400">
-                     <div className="w-20 h-20 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-4">
-                        <X size={30} />
-                     </div>
-                     <p>לא צורף קובץ</p>
+                      <div className="w-20 h-20 bg-slate-200 rounded-full flex items-center justify-center mx-auto mb-4">
+                         <X size={30} />
+                      </div>
+                      <p>לא צורף קובץ</p>
                   </div>
                )}
             </div>
@@ -296,13 +289,13 @@ export default function AdminDashboard() {
             <div className="w-full md:w-1/2 p-8 flex flex-col">
                <div className="flex justify-between items-start mb-6">
                   <div>
-                     <span className={`text-xs font-bold px-3 py-1 rounded-full ${
-                        selectedRequest.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                     }`}>
-                        {selectedRequest.type === 'income' ? 'עדכון פעילות' : 'בקשת תשלום'}
-                     </span>
-                     <h2 className="text-2xl font-bold text-slate-900 mt-2">{selectedRequest.branch}</h2>
-                     <p className="text-slate-500">{selectedRequest.shaliach} • {selectedRequest.date}</p>
+                      <span className={`text-xs font-bold px-3 py-1 rounded-full ${
+                         selectedRequest.type === 'income' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      }`}>
+                         {selectedRequest.type === 'income' ? 'עדכון פעילות' : 'בקשת תשלום'}
+                      </span>
+                      <h2 className="text-2xl font-bold text-slate-900 mt-2">{selectedRequest.branch}</h2>
+                      <p className="text-slate-500">{selectedRequest.shaliach} • {selectedRequest.date}</p>
                   </div>
                   <button onClick={closeModal} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={24} /></button>
                </div>
@@ -310,52 +303,52 @@ export default function AdminDashboard() {
                <div className="flex-1 space-y-6 overflow-y-auto">
                   {/* פרטי הפעילות */}
                   <div className="bg-slate-50 p-5 rounded-2xl space-y-3">
-                     <h4 className="font-bold text-slate-800 border-b border-slate-200 pb-2">פרטי הדיווח</h4>
-                     <p><span className="text-slate-500 text-sm ml-2">נושא:</span><span className="font-bold">{selectedRequest.title}</span></p>
-                     
-                     {selectedRequest.type === 'income' ? (
-                       <>
-                         <p><span className="text-slate-500 text-sm ml-2">כמות משתתפים:</span><span className="font-bold">{selectedRequest.details.participants}</span></p>
-                         <p><span className="text-slate-500 text-sm ml-2">יום:</span><span className="font-bold">{selectedRequest.details.day}</span></p>
-                         <p><span className="text-slate-500 text-sm ml-2">קהל יעד:</span><span className="font-bold">{selectedRequest.details.audience === 'boys' ? 'בנים' : 'בנות'}</span></p>
-                         
-                         <div className="mt-4 bg-green-50 p-3 rounded-xl border border-green-100">
-                            <p className="text-green-800 text-sm">המערכת חישבה זיכוי של:</p>
-                            <p className="text-2xl font-black text-green-600">₪{calculateSuggestedAmount(selectedRequest.details.participants)}</p>
-                         </div>
-                       </>
-                     ) : (
-                       <>
-                         <p><span className="text-slate-500 text-sm ml-2">הערות:</span><span className="font-bold">{selectedRequest.details.notes || '-'}</span></p>
-                         
-                         {selectedRequest.details.bank_details && (
-                           <div className="text-xs bg-white p-2 rounded border border-slate-200 mt-2">
-                             <p className="font-bold text-slate-700 mb-1">פרטי בנק:</p>
-                             <p>ע"ש: {selectedRequest.details.bank_details.ownerName}</p>
-                             <p>בנק: {selectedRequest.details.bank_details.bankNumber} | סניף: {selectedRequest.details.bank_details.branchNumber}</p>
-                             <p>חשבון: {selectedRequest.details.bank_details.accountNumber}</p>
-                           </div>
-                         )}
+                      <h4 className="font-bold text-slate-800 border-b border-slate-200 pb-2">פרטי הדיווח</h4>
+                      <p><span className="text-slate-500 text-sm ml-2">נושא:</span><span className="font-bold">{selectedRequest.title}</span></p>
+                      
+                      {selectedRequest.type === 'income' ? (
+                        <>
+                          <p><span className="text-slate-500 text-sm ml-2">כמות משתתפים:</span><span className="font-bold">{selectedRequest.details.participants}</span></p>
+                          <p><span className="text-slate-500 text-sm ml-2">יום:</span><span className="font-bold">{selectedRequest.details.day}</span></p>
+                          <p><span className="text-slate-500 text-sm ml-2">קהל יעד:</span><span className="font-bold">{selectedRequest.details.audience === 'boys' ? 'בנים' : 'בנות'}</span></p>
+                          
+                          <div className="mt-4 bg-green-50 p-3 rounded-xl border border-green-100">
+                             <p className="text-green-800 text-sm">המערכת חישבה זיכוי של:</p>
+                             <p className="text-2xl font-black text-green-600">₪{calculateSuggestedAmount(selectedRequest.details.participants)}</p>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <p><span className="text-slate-500 text-sm ml-2">הערות:</span><span className="font-bold">{selectedRequest.details.notes || '-'}</span></p>
+                          
+                          {selectedRequest.details.bank_details && (
+                            <div className="text-xs bg-white p-2 rounded border border-slate-200 mt-2">
+                              <p className="font-bold text-slate-700 mb-1">פרטי בנק:</p>
+                              <p>ע"ש: {selectedRequest.details.bank_details.ownerName}</p>
+                              <p>בנק: {selectedRequest.details.bank_details.bankNumber} | סניף: {selectedRequest.details.bank_details.branchNumber}</p>
+                              <p>חשבון: {selectedRequest.details.bank_details.accountNumber}</p>
+                            </div>
+                          )}
 
-                         <div className="mt-4 bg-red-50 p-3 rounded-xl border border-red-100">
-                            <p className="text-red-800 text-sm">סכום לתשלום:</p>
-                            <p className="text-2xl font-black text-red-600">₪{selectedRequest.amount}</p>
-                         </div>
-                       </>
-                     )}
+                          <div className="mt-4 bg-red-50 p-3 rounded-xl border border-red-100">
+                             <p className="text-red-800 text-sm">סכום לתשלום:</p>
+                             <p className="text-2xl font-black text-red-600">₪{selectedRequest.amount}</p>
+                          </div>
+                        </>
+                      )}
                   </div>
 
                   {/* אזור דחייה (אם נלחץ) */}
                   {isRejecting && (
                     <div className="bg-red-50 p-4 rounded-2xl border border-red-100 animate-in slide-in-from-top-2">
-                       <label className="text-sm font-bold text-red-800 mb-2 block">מדוע הבקשה נדחית? (חובה)</label>
-                       <textarea 
-                          className="w-full p-3 rounded-xl border-red-200 focus:ring-red-500 focus:border-red-500 text-sm"
-                          rows={3}
-                          placeholder="כתוב כאן הודעה שתשלח לשליח..."
-                          value={rejectionReason}
-                          onChange={(e) => setRejectionReason(e.target.value)}
-                       />
+                        <label className="text-sm font-bold text-red-800 mb-2 block">מדוע הבקשה נדחית? (חובה)</label>
+                        <textarea 
+                           className="w-full p-3 rounded-xl border-red-200 focus:ring-red-500 focus:border-red-500 text-sm"
+                           rows={3}
+                           placeholder="כתוב כאן הודעה שתשלח לשליח..."
+                           value={rejectionReason}
+                           onChange={(e) => setRejectionReason(e.target.value)}
+                        />
                     </div>
                   )}
                </div>
@@ -364,35 +357,35 @@ export default function AdminDashboard() {
                <div className="mt-8 grid grid-cols-2 gap-4">
                   {!isRejecting ? (
                     <>
-                       <button 
-                         onClick={() => setIsRejecting(true)}
-                         className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold border border-slate-200 text-slate-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all"
-                       >
-                          <X size={20} />
-                          דחה בקשה
-                       </button>
-                       <button 
-                         onClick={handleApprove}
-                         className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold bg-slate-900 text-white hover:bg-green-600 shadow-lg shadow-slate-900/20 transition-all"
-                       >
-                          <Check size={20} />
-                          אשר בקשה
-                       </button>
+                        <button 
+                          onClick={() => setIsRejecting(true)}
+                          className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold border border-slate-200 text-slate-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-all"
+                        >
+                           <X size={20} />
+                           דחה בקשה
+                        </button>
+                        <button 
+                          onClick={handleApprove}
+                          className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold bg-slate-900 text-white hover:bg-green-600 shadow-lg shadow-slate-900/20 transition-all"
+                        >
+                           <Check size={20} />
+                           אשר בקשה
+                        </button>
                     </>
                   ) : (
                     <>
-                       <button 
-                         onClick={() => setIsRejecting(false)}
-                         className="py-4 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition-all"
-                       >
-                          ביטול
-                       </button>
-                       <button 
-                         onClick={handleReject}
-                         className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 shadow-lg shadow-red-600/20 transition-all"
-                       >
-                          שלח דחייה
-                       </button>
+                        <button 
+                          onClick={() => setIsRejecting(false)}
+                          className="py-4 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition-all"
+                        >
+                           ביטול
+                        </button>
+                        <button 
+                          onClick={handleReject}
+                          className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold bg-red-600 text-white hover:bg-red-700 shadow-lg shadow-red-600/20 transition-all"
+                        >
+                           שלח דחייה
+                        </button>
                     </>
                   )}
                </div>

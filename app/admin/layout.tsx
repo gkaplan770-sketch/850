@@ -4,8 +4,8 @@ import React, { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { 
-  LayoutDashboard, PieChart, History, MessageSquare, 
-  Users, DollarSign, FileText, LogOut, Menu
+  LayoutDashboard, PieChart, History, Users, 
+  DollarSign, FileText, LogOut, Menu 
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -14,8 +14,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
-  // האם אנחנו בדף הכניסה?
-  const isLoginPage = pathname === '/admin/login';
+  // בודק אם המילה login מופיעה בכתובת
+  const isLoginPage = pathname?.includes('/login');
 
   useEffect(() => {
     // 1. אם אנחנו בדף הלוגין - אין צורך בבדיקות אבטחה
@@ -25,7 +25,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
 
     // 2. בדיקת אבטחה: האם יש למשתמש אישור כניסה?
-    // (בודק אם הקוקי "admin-auth" קיים)
     const hasAuth = document.cookie.includes('admin-auth=true');
 
     if (!hasAuth) {
@@ -69,7 +68,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <li>
               <Link href="/admin/dashboard" className={`flex items-center p-3 rounded-xl hover:bg-slate-800 hover:text-white transition-colors ${pathname === '/admin/dashboard' ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50' : ''}`}>
                  <LayoutDashboard size={20} className="ml-3" />
-                 <span>לוח בקרה (ממתינים)</span>
+                 <span>לוח בקרה</span>
               </Link>
             </li>
             <li>
