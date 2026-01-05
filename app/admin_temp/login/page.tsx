@@ -12,7 +12,10 @@ export default function AdminLogin() {
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    // הקוד הסודי שהגדרת
     if (code === '226770226') {
+      // שמירת קוקי לזיהוי
+      document.cookie = "admin-auth=true; path=/; max-age=86400"; // תקף ליום אחד
       router.push('/admin/dashboard');
     } else {
       setError(true);
