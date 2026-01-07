@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   Tags, Plus, Edit2, Trash2, X, Users, ArrowRight, 
-  ListPlus, CheckSquare, Type, Calendar, Image as ImageIcon 
+  ListPlus, CheckSquare, Image as ImageIcon, ToggleLeft, ToggleRight
 } from "lucide-react";
 
 // --- Interfaces ---
@@ -17,9 +17,9 @@ interface Tier {
 
 interface CustomField {
   id: string;
-  label: string;      // השאלה עצמה (למשל: "האם חולק כיבוד?")
-  type: 'text' | 'number' | 'boolean' | 'long-text'; // סוג התשובה
-  required: boolean;  // האם חובה למלא
+  label: string;
+  type: 'text' | 'number' | 'boolean' | 'long-text';
+  required: boolean;
 }
 
 interface ActivityType {
@@ -27,7 +27,8 @@ interface ActivityType {
   name: string;
   category: string;
   tiers: Tier[];
-  custom_fields: CustomField[]; // רשימת השדות הדינמיים
+  custom_fields: CustomField[];
+  image_required: boolean; // שדה חדש: האם תמונה חובה
 }
 
 // --- Helper for Random ID ---
@@ -43,14 +44,18 @@ export default function ActivityTypesPage() {
     name: '',
     category: 'regular',
     tiers: [] as Tier[],
-    custom_fields: [] as CustomField[]
+    custom_fields: [] as CustomField[],
+    image_required: true // ברירת מחדל: תמונה חובה
   });
 
   const fetchActivities = async () => {
     setLoading(true);
-    // חשוב: לוודא שבוחרים גם את העמודה החדשה custom_fields
-    const { data } = await supabase.from('activity_types').select('*').order('name');
-    setActivities(data || []);
+    const { data, error } = await supabase.from('activity_types').select('*').order('name');
+    if (error) {
+      console.error("Error fetching activities:", error);
+    } else {
+      setActivities(data || []);
+    }
     setLoading(false);
   };
 
@@ -68,23 +73,35 @@ export default function ActivityTypesPage() {
       name: formData.name,
       category: formData.category,
       tiers: formData.tiers,
-      custom_fields: formData.custom_fields // שמירת השדות הדינמיים
+      custom_fields: formData.custom_fields,
+      image_required: formData.image_required
     };
 
-    if (editingItem) {
-      await supabase.from('activity_types').update(payload).eq('id', editingItem.id);
-    } else {
-      await supabase.from('activity_types').insert([payload]);
+    try {
+      if (editingItem) {
+        const { error } = await supabase.from('activity_types').update(payload).eq('id', editingItem.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('activity_types').insert([payload]);
+        if (error) throw error;
+      }
+      
+      setIsModalOpen(false);
+      fetchActivities();
+    } catch (err) {
+      console.error(err);
+      alert("שגיאה בשמירת הנתונים. נסה שוב.");
     }
-    
-    setIsModalOpen(false);
-    fetchActivities();
   };
 
   const handleDelete = async (id: string) => {
     if (confirm("האם למחוק סוג פעילות זה?")) {
-      await supabase.from('activity_types').delete().eq('id', id);
-      fetchActivities();
+      const { error } = await supabase.from('activity_types').delete().eq('id', id);
+      if (error) {
+        alert("לא ניתן למחוק פעילות שיש לה דיווחים מקושרים.");
+      } else {
+        fetchActivities();
+      }
     }
   };
 
@@ -95,7 +112,8 @@ export default function ActivityTypesPage() {
         name: item.name,
         category: item.category,
         tiers: item.tiers || [],
-        custom_fields: item.custom_fields || []
+        custom_fields: item.custom_fields || [],
+        image_required: item.image_required !== false // אם זה null או undefined נניח שזה true
       });
     } else {
       setEditingItem(null);
@@ -103,7 +121,8 @@ export default function ActivityTypesPage() {
           name: '', 
           category: 'regular', 
           tiers: [{ min: 1, max: 999, amount: 0 }],
-          custom_fields: [] 
+          custom_fields: [],
+          image_required: true
       });
     }
     setIsModalOpen(true);
@@ -111,10 +130,10 @@ export default function ActivityTypesPage() {
 
   // --- ניהול מדרגות ---
   const addTier = () => {
-      setFormData({
-          ...formData,
-          tiers: [...formData.tiers, { min: 0, max: 0, amount: 0 }]
-      });
+      setFormData(prev => ({
+          ...prev,
+          tiers: [...prev.tiers, { min: 0, max: 0, amount: 0 }]
+      }));
   };
 
   const removeTier = (index: number) => {
@@ -137,7 +156,7 @@ export default function ActivityTypesPage() {
       type: 'text',
       required: false
     };
-    setFormData({ ...formData, custom_fields: [...formData.custom_fields, newField] });
+    setFormData(prev => ({ ...prev, custom_fields: [...prev.custom_fields, newField] }));
   };
 
   const removeField = (index: number) => {
@@ -160,7 +179,7 @@ export default function ActivityTypesPage() {
             <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                <Tags className="text-pink-600" /> הגדרות סוגי פעילות
             </h1>
-            <p className="text-slate-500 text-sm mt-1">ניהול שכר, מדרגות ושאלות דיווח</p>
+            <p className="text-slate-500 text-sm mt-1">ניהול שכר, מדרגות והגדרות דיווח</p>
          </div>
          <button onClick={() => openModal()} className="bg-pink-600 hover:bg-pink-700 text-white px-4 py-3 rounded-xl font-bold flex items-center gap-2 shadow-lg transition-all">
             <Plus size={20} /> פעילות חדשה
@@ -174,13 +193,11 @@ export default function ActivityTypesPage() {
                <div className="flex justify-between items-start mb-4">
                   <div>
                       <h3 className="font-bold text-lg text-slate-800">{act.name}</h3>
-                      <div className="flex gap-2 mt-1">
+                      <div className="flex flex-wrap gap-2 mt-1">
                         <span className="text-xs bg-slate-100 text-slate-500 px-2 py-1 rounded-full">{act.category === 'regular' ? 'שוטף' : 'מיוחד'}</span>
-                        {act.custom_fields && act.custom_fields.length > 0 && (
-                          <span className="text-xs bg-purple-50 text-purple-600 px-2 py-1 rounded-full flex items-center gap-1">
-                            <ListPlus size={12}/> {act.custom_fields.length} שאלות
-                          </span>
-                        )}
+                        <span className={`text-xs px-2 py-1 rounded-full flex items-center gap-1 ${act.image_required !== false ? 'bg-blue-50 text-blue-600' : 'bg-slate-50 text-slate-400'}`}>
+                           <ImageIcon size={12}/> {act.image_required !== false ? 'תמונה חובה' : 'ללא תמונה'}
+                        </span>
                       </div>
                   </div>
                   <div className="flex gap-2">
@@ -191,11 +208,11 @@ export default function ActivityTypesPage() {
                
                {/* תצוגה מקוצרת של מדרגות */}
                <div className="bg-slate-50 rounded-xl p-3 mt-auto">
-                   <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">מדרגות תשלום:</p>
+                   <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">מחירון (לפי משתתפים):</p>
                    <div className="space-y-1">
                        {act.tiers?.slice(0, 3).map((t, idx) => (
                            <div key={idx} className="flex justify-between text-xs text-slate-600">
-                               <span>{t.min}-{t.max} משתתפים</span>
+                               <span>{t.min}-{t.max}</span>
                                <span className="font-bold text-green-600">₪{t.amount}</span>
                            </div>
                        ))}
@@ -219,17 +236,27 @@ export default function ActivityTypesPage() {
               <div className="overflow-y-auto flex-1 p-6 space-y-8 bg-slate-50/50">
                   
                   {/* פרטים כלליים */}
-                  <div className="grid grid-cols-2 gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                        <div className="col-span-2 md:col-span-1">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
+                        <div>
                             <label className="text-xs font-bold text-slate-500 mb-1 block">שם הפעילות</label>
                             <input required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-pink-500 focus:ring-2 focus:ring-pink-100 transition-all" placeholder="לדוגמה: מסיבת ראש חודש" />
                         </div>
-                        <div className="col-span-2 md:col-span-1">
+                        <div>
                             <label className="text-xs font-bold text-slate-500 mb-1 block">קטגוריה</label>
                             <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full p-3 rounded-xl border bg-white outline-none focus:border-pink-500">
-                            <option value="regular">פעילות שוטפת</option>
-                            <option value="special">אירוע מיוחד/שיא</option>
+                                <option value="regular">פעילות שוטפת</option>
+                                <option value="special">אירוע מיוחד/שיא</option>
                             </select>
+                        </div>
+                        <div className="flex items-end">
+                            <button 
+                                type="button"
+                                onClick={() => setFormData({...formData, image_required: !formData.image_required})}
+                                className={`w-full p-3 rounded-xl border flex items-center justify-between gap-2 transition-all ${formData.image_required ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-slate-50 border-slate-200 text-slate-500'}`}
+                            >
+                                <span className="text-sm font-bold">{formData.image_required ? 'תמונה: חובה' : 'תמונה: רשות'}</span>
+                                {formData.image_required ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
+                            </button>
                         </div>
                   </div>
 
@@ -237,16 +264,14 @@ export default function ActivityTypesPage() {
                     
                     {/* עמודה ימנית: שאלות ונתונים */}
                     <div className="space-y-6">
-                        {/* שדות קבועים (לקריאה בלבד) */}
+                        {/* שדות קבועים */}
                         <div className="bg-slate-100 p-4 rounded-2xl border border-slate-200 opacity-70">
                             <h3 className="text-sm font-bold text-slate-600 mb-3 flex items-center gap-2">
-                                <CheckSquare size={16} /> שדות חובה גלובליים (קבוע לכולם)
+                                <CheckSquare size={16} /> שדות חובה גלובליים (קבוע)
                             </h3>
                             <div className="grid grid-cols-2 gap-2 text-xs text-slate-500">
                                 <div className="bg-white p-2 rounded border border-slate-200 flex items-center gap-2"><Users size={14}/> קהל (בנים/בנות)</div>
-                                <div className="bg-white p-2 rounded border border-slate-200 flex items-center gap-2"><Calendar size={14}/> תאריך ושעה</div>
                                 <div className="bg-white p-2 rounded border border-slate-200 flex items-center gap-2"><Users size={14}/> כמות משתתפים</div>
-                                <div className="bg-white p-2 rounded border border-slate-200 flex items-center gap-2"><ImageIcon size={14}/> תמונה (אופציונלי)</div>
                             </div>
                         </div>
 
@@ -254,7 +279,7 @@ export default function ActivityTypesPage() {
                         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                             <div className="flex justify-between items-center mb-4">
                                 <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
-                                    <ListPlus size={16} className="text-purple-600"/> שאלות נוספות לדיווח
+                                    <ListPlus size={16} className="text-purple-600"/> שאלות דיווח נוספות
                                 </label>
                                 <button type="button" onClick={addField} className="text-xs bg-purple-50 text-purple-700 border border-purple-100 px-3 py-1.5 rounded-lg font-bold hover:bg-purple-100 transition-colors">
                                     + הוסף שאלה
@@ -263,7 +288,7 @@ export default function ActivityTypesPage() {
 
                             <div className="space-y-3">
                                 {formData.custom_fields.map((field, index) => (
-                                    <div key={field.id || index} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center bg-slate-50 p-3 rounded-xl border border-slate-100 animate-in fade-in slide-in-from-bottom-2">
+                                    <div key={field.id || index} className="flex flex-col sm:flex-row gap-2 items-start sm:items-center bg-slate-50 p-3 rounded-xl border border-slate-100">
                                         <div className="flex-1 w-full">
                                             <input 
                                                 type="text" 
@@ -280,30 +305,17 @@ export default function ActivityTypesPage() {
                                                 className="w-full text-sm bg-white p-2 rounded border outline-none focus:border-purple-500"
                                             >
                                                 <option value="text">טקסט קצר</option>
-                                                <option value="long-text">טקסט ארוך</option>
                                                 <option value="number">מספר</option>
                                                 <option value="boolean">כן / לא</option>
                                             </select>
                                         </div>
-                                        <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-start">
-                                            <label className="flex items-center gap-1 text-xs cursor-pointer select-none">
-                                                <input 
-                                                    type="checkbox" 
-                                                    checked={field.required}
-                                                    onChange={e => updateField(index, 'required', e.target.checked)}
-                                                    className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500"
-                                                />
-                                                <span className={field.required ? "font-bold text-slate-700" : "text-slate-400"}>חובה</span>
-                                            </label>
-                                            <button type="button" onClick={() => removeField(index)} className="text-red-400 hover:text-red-600 hover:bg-red-50 p-1.5 rounded-lg transition-colors"><Trash2 size={16} /></button>
+                                        <div className="flex items-center gap-2">
+                                            <button type="button" onClick={() => removeField(index)} className="text-red-400 hover:text-red-600 p-1.5"><Trash2 size={16} /></button>
                                         </div>
                                     </div>
                                 ))}
                                 {formData.custom_fields.length === 0 && (
-                                    <div className="text-center py-6 text-slate-400 bg-slate-50 rounded-xl border border-dashed border-slate-200">
-                                        <p className="text-xs">אין שאלות מיוחדות לפעילות זו.</p>
-                                        <p className="text-xs">הדיווח יכלול רק את שדות החובה.</p>
-                                    </div>
+                                    <p className="text-center text-xs text-slate-400 py-4">אין שאלות מיוחדות.</p>
                                 )}
                             </div>
                         </div>

@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import * as XLSX from 'xlsx';
 import { 
   Search, Plus, Edit2, Trash2, User, Users,
-  MapPin, Hash, Save, X, Upload, FileSpreadsheet, Download 
+  MapPin, X, FileSpreadsheet, Download 
 } from "lucide-react";
 
 interface UserData {
@@ -19,6 +19,7 @@ interface UserData {
   spouse_first_name?: string;
   spouse_phone?: string;
   role: 'admin' | 'shaliach';
+  balance?: number; // שדה חדש ליתרה
 }
 
 export default function UsersManagement() {
@@ -43,19 +44,51 @@ export default function UsersManagement() {
     role: 'shaliach'
   });
 
-  const fetchUsers = async () => {
+  const fetchUsersAndBalances = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    
+    // 1. שליפת כל המשתמשים
+    const { data: usersData, error: usersError } = await supabase
       .from('users')
       .select('*')
       .order('branch_name', { ascending: true });
 
-    if (!error) setUsers(data || []);
+    if (usersError) {
+      console.error("Error fetching users:", usersError);
+      setLoading(false);
+      return;
+    }
+
+    // 2. שליפת כל העסקאות המאושרות לחישוב יתרה
+    const { data: txData, error: txError } = await supabase
+        .from('transactions')
+        .select('user_id, amount, type')
+        .eq('status', 'approved');
+
+    if (txError) console.error("Error fetching transactions:", txError);
+
+    // 3. חישוב יתרה לכל שליח (מילון: מזהה משתמש -> סכום)
+    const balances: Record<string, number> = {};
+    if (txData) {
+        txData.forEach(tx => {
+            if (!balances[tx.user_id]) balances[tx.user_id] = 0;
+            if (tx.type === 'income') balances[tx.user_id] += tx.amount;
+            else balances[tx.user_id] -= tx.amount;
+        });
+    }
+
+    // 4. מיזוג הנתונים (הוספת היתרה לאובייקט המשתמש)
+    const mergedUsers = (usersData || []).map(u => ({
+        ...u,
+        balance: balances[u.id] || 0
+    }));
+
+    setUsers(mergedUsers);
     setLoading(false);
   };
 
   useEffect(() => {
-    fetchUsers();
+    fetchUsersAndBalances();
   }, []);
 
   const filteredUsers = users.filter(u => 
@@ -106,7 +139,7 @@ export default function UsersManagement() {
         if (error) throw error;
       }
       setIsModalOpen(false);
-      fetchUsers();
+      fetchUsersAndBalances();
     } catch (err) {
       console.error(err);
       alert("שגיאה בשמירה");
@@ -118,11 +151,11 @@ export default function UsersManagement() {
     try {
       const { error } = await supabase.from('users').delete().eq('id', id);
       if (error) alert("לא ניתן למחוק משתמש עם היסטוריה כספית.");
-      else fetchUsers();
+      else fetchUsersAndBalances();
     } catch (err) { console.error(err); }
   };
 
-  // --- ייבוא מאקסל ---
+  // --- ייבוא משתמשים מאקסל ---
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0]) return;
     
@@ -137,13 +170,11 @@ export default function UsersManagement() {
         const wsName = wb.SheetNames[0];
         const ws = wb.Sheets[wsName];
         
-        // כאן התיקון: הסרנו את הטייפ מהלולאה
         const data: any[] = XLSX.utils.sheet_to_json(ws);
 
         let successCount = 0;
         let failCount = 0;
 
-        // התיקון כאן: במקום (const row: any of data) כתבנו פשוט (const row of data)
         for (const row of data) {
           const newUser = {
             teudat_zehut: row['teudat_zehut'] || row['id'] || row['תעודת זהות'],
@@ -178,7 +209,7 @@ export default function UsersManagement() {
         }
 
         alert(`התהליך הסתיים:\n${successCount} משתמשים נוספו בהצלחה.\n${failCount} נכשלו (או שהיו קיימים כבר).`);
-        fetchUsers();
+        fetchUsersAndBalances();
 
       } catch (err) {
         console.error(err);
@@ -263,8 +294,8 @@ export default function UsersManagement() {
                <tr>
                   <th className="px-6 py-4">שם השליח/ה</th>
                   <th className="px-6 py-4">סניף</th>
-                  <th className="px-6 py-4">פרטי קשר (שליח)</th>
-                  <th className="px-6 py-4">פרטי קשר (אישה)</th>
+                  <th className="px-6 py-4">מאזן</th>
+                  <th className="px-6 py-4">פרטי קשר</th>
                   <th className="px-6 py-4">תעודת זהות</th>
                   <th className="px-6 py-4">פעולות</th>
                </tr>
@@ -281,8 +312,16 @@ export default function UsersManagement() {
                            <MapPin size={14} /> {u.branch_name}
                         </div>
                      </td>
-                     <td className="px-6 py-4 text-sm text-slate-600">{u.phone || '-'}</td>
-                     <td className="px-6 py-4 text-sm text-slate-600">{u.spouse_phone || '-'}</td>
+                     {/* עמודת המאזן החדשה */}
+                     <td className={`px-6 py-4 font-black dir-ltr text-right ${
+                        (u.balance || 0) >= 0 ? 'text-green-600' : 'text-red-600'
+                     }`}>
+                        ₪{(u.balance || 0).toLocaleString()}
+                     </td>
+                     <td className="px-6 py-4 text-sm text-slate-600">
+                        <div>{u.phone || '-'}</div>
+                        {u.spouse_phone && <div className="text-xs text-slate-400 mt-0.5">{u.spouse_phone}</div>}
+                     </td>
                      <td className="px-6 py-4 font-mono text-slate-500 text-sm">{u.teudat_zehut}</td>
                      <td className="px-6 py-4">
                         <div className="flex gap-2">
@@ -296,7 +335,7 @@ export default function UsersManagement() {
          </table>
       </div>
 
-      {/* מודל */}
+      {/* מודל הוספה/עריכה */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
            <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">

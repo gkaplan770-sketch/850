@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   ArrowRight, Users, Camera, 
-  Calendar, ChevronDown, Smile 
+  Calendar, ChevronDown, Smile, AlertCircle 
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
@@ -13,6 +13,7 @@ interface ActivityType {
   id: string;
   name: string;
   category: string;
+  image_required: boolean; // האם חובה תמונה?
   tiers: { min: number; max: number; amount: number }[];
 }
 
@@ -37,6 +38,10 @@ export default function IncomeReportPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
+  // משתנה עזר לבדיקת חובת תמונה
+  const currentAct = activityTypes.find(a => a.id === selectedActId);
+  const isImageRequired = currentAct?.image_required !== false; // ברירת מחדל true אם לא מוגדר
+
   useEffect(() => {
     const id = localStorage.getItem('user_id');
     if (!id) { router.push('/'); return; }
@@ -51,18 +56,17 @@ export default function IncomeReportPage() {
     setLoadingTypes(false);
   };
 
-  // --- המוח: חישוב אוטומטי של הסכום ---
+  // --- חישוב אוטומטי של הסכום ---
   useEffect(() => {
     const count = Number(participants);
-    const act = activityTypes.find(a => a.id === selectedActId);
     
-    if (!act || count <= 0 || !act.tiers) {
+    if (!currentAct || count <= 0 || !currentAct.tiers) {
       setCalculatedReward(0);
       return;
     }
 
     // חיפוש המדרגה המתאימה
-    const tier = act.tiers.find(t => count >= t.min && count <= t.max);
+    const tier = currentAct.tiers.find(t => count >= t.min && count <= t.max);
     
     if (tier) {
       setCalculatedReward(tier.amount);
@@ -78,35 +82,47 @@ export default function IncomeReportPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedActId || !imageFile) { alert("חובה לבחור פעילות ולהעלות תמונה"); return; }
+    
+    // בדיקות תקינות
+    if (!selectedActId) { alert("חובה לבחור סוג פעילות"); return; }
+    
+    // אכיפת חובת תמונה לפי הגדרת המנהל
+    if (isImageRequired && !imageFile) { 
+        alert("עבור פעילות זו חובה להעלות תמונה"); 
+        return; 
+    }
     
     const total = Number(participants);
-
     setIsSubmitting(true);
 
     try {
-      // 1. העלאת תמונה
-      const fileExt = imageFile.name.split('.').pop();
-      const fileName = `act_${userId}_${Date.now()}.${fileExt}`;
-      const { error: uploadError } = await supabase.storage.from('images').upload(fileName, imageFile);
-      if (uploadError) throw uploadError;
-      const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
+      let publicUrl = null;
+
+      // 1. העלאת תמונה (אם נבחרה)
+      if (imageFile) {
+          const fileExt = imageFile.name.split('.').pop();
+          const fileName = `act_${userId}_${Date.now()}.${fileExt}`;
+          const { error: uploadError } = await supabase.storage.from('images').upload(fileName, imageFile);
+          if (uploadError) throw uploadError;
+          const { data: urlData } = supabase.storage.from('images').getPublicUrl(fileName);
+          publicUrl = urlData.publicUrl;
+      }
 
       // 2. שמירת הדיווח
-      const actName = activityTypes.find(a => a.id === selectedActId)?.name || 'פעילות';
+      const actName = currentAct?.name || 'פעילות';
       
       const { error: insertError } = await supabase.from('transactions').insert([{
         user_id: userId,
-        type: 'income', // הכנסה
+        type: 'income',
         title: actName,
-        amount: calculatedReward, // הסכום שחושב אוטומטית
+        amount: calculatedReward,
         date: date,
-        status: 'pending', // ממתין לאישור מנהל
-        file_url: urlData.publicUrl,
+        status: 'pending',
+        file_url: publicUrl,
         details: {
           activity_id: selectedActId,
           participants: total,
-          audience: audience, // כאן נשמר אם זה בנים או בנות
+          audience: audience, // בנים או בנות
           notes: description,
           calculated_by_system: true
         }
@@ -174,7 +190,7 @@ export default function IncomeReportPage() {
               </div>
 
               <div className="pt-2">
-                 <label className="text-xs font-bold text-slate-500 mb-1 block">כמה השתתפו סה"כ?</label>
+                 <label className="text-xs font-bold text-slate-500 mb-1 block">כמה משתתפים היו?</label>
                  <div className="relative">
                     <input 
                       type="number" 
@@ -188,7 +204,7 @@ export default function IncomeReportPage() {
                  </div>
               </div>
 
-              {/* כפתורי בחירה - בנים / בנות */}
+              {/* כפתורי בחירה - בנים / בנות (בחירה אחת בלבד) */}
               <div>
                  <label className="text-xs font-bold text-slate-500 mb-2 block">מי היה הקהל?</label>
                  <div className="grid grid-cols-2 gap-3">
@@ -230,9 +246,15 @@ export default function IncomeReportPage() {
            {/* כרטיס תמונה והערות */}
            <div className="bg-white p-5 rounded-3xl border border-slate-100 shadow-sm space-y-4">
               <div>
-                 <label className="text-xs font-bold text-slate-500 mb-1 block">תמונה מהפעילות (חובה)</label>
+                 <div className="flex justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-500 block">תמונה מהפעילות</label>
+                    <span className={`text-[10px] px-2 rounded-full ${isImageRequired ? 'bg-red-100 text-red-600 font-bold' : 'bg-green-100 text-green-600'}`}>
+                        {isImageRequired ? 'חובה' : 'רשות'}
+                    </span>
+                 </div>
+                 
                  <div className="relative">
-                    <input type="file" required accept="image/*" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
+                    <input type="file" required={isImageRequired} accept="image/*" onChange={handleFileChange} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" />
                     <div className={`border-2 border-dashed rounded-2xl p-6 text-center transition-colors ${imageFile ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-400'}`}>
                        <Camera className={`mx-auto mb-2 ${imageFile ? 'text-blue-600' : 'text-slate-300'}`} size={32} />
                        <p className={`text-sm font-bold ${imageFile ? 'text-blue-700' : 'text-slate-500'}`}>

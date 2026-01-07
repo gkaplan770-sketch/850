@@ -12,7 +12,7 @@ import {
   ShieldCheck,
   Tags,
   Scale,
-  Activity // הוספתי את האייקון הזה
+  Activity // האייקון לסטטיסטיקה
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -25,7 +25,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       icon: <LayoutDashboard size={20} /> 
     },
     { 
-      name: 'סטטיסטיקה', // הוספתי את הקישור הזה שביקשת
+      name: 'סטטיסטיקה', // הוספנו את זה כדי שהלשונית תופיע
       href: '/admin/overview', 
       icon: <Activity size={20} /> 
     },

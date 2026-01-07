@@ -62,7 +62,6 @@ export default function ExpenseRequestPage() {
     }
   };
 
-  // פונקציה שמטפלת בשני סוגי הקבצים
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'invoice' | 'bank') => {
     if (e.target.files && e.target.files[0]) {
         if (type === 'invoice') setInvoiceFile(e.target.files[0]);
@@ -78,15 +77,18 @@ export default function ExpenseRequestPage() {
     return income - expense;
   };
 
+  // פונקציה לניקוי תווים בעייתיים משמות קבצים
+  const sanitizeText = (text: string) => {
+    return text.replace(/[^a-zA-Z0-9א-ת\- ]/g, "").replace(/\s+/g, "_");
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setBalanceError(null);
 
-    // בדיקות תקינות
     if (!userId) return;
     if (!invoiceFile) { alert("חובה להעלות קבלה/חשבונית"); return; }
     
-    // בדיקה ייחודית לספק חדש
     if (mode === 'supplier_new' && !bankFile) {
         alert("עבור ספק חדש חובה לצרף צילום צ'ק או אישור ניהול חשבון");
         return;
@@ -104,9 +106,21 @@ export default function ExpenseRequestPage() {
         return;
       }
 
-      // 2. העלאת הקבלה (Invoice)
+      // 2. העלאת הקבלה (Invoice) עם שם מפורט
       const invExt = invoiceFile.name.split('.').pop();
-      const invName = `inv_${userId}_${Date.now()}.${invExt}`;
+      const dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+      
+      let typeStr = 'הוצאה';
+      if (mode === 'refund') typeStr = 'החזר_הוצאות';
+      if (mode === 'supplier_exist') typeStr = 'ספק_קיים';
+      if (mode === 'supplier_new') typeStr = 'ספק_חדש';
+
+      const safeBranch = sanitizeText(branchName);
+      const safeSupplier = sanitizeText(supplierName);
+      
+      // פורמט השם החדש: סוג_סניף_ספק_סכום_תאריך_חותמתזמן
+      const invName = `${typeStr}_${safeBranch}_${safeSupplier}_${amount}SH_${dateStr}_${Date.now()}.${invExt}`;
+
       const { error: upErr1 } = await supabase.storage.from('images').upload(invName, invoiceFile);
       if (upErr1) throw upErr1;
       const { data: invUrlData } = supabase.storage.from('images').getPublicUrl(invName);
@@ -115,7 +129,8 @@ export default function ExpenseRequestPage() {
       let bankFileUrl = null;
       if (mode === 'supplier_new' && bankFile) {
           const bankExt = bankFile.name.split('.').pop();
-          const bankName = `bank_${userId}_${Date.now()}.${bankExt}`;
+          // גם כאן ניתן שם משמעותי
+          const bankName = `BANK_CONFIRM_${safeBranch}_${safeSupplier}_${dateStr}_${Date.now()}.${bankExt}`;
           const { error: upErr2 } = await supabase.storage.from('images').upload(bankName, bankFile);
           if (upErr2) throw upErr2;
           const { data: bankUrlData } = supabase.storage.from('images').getPublicUrl(bankName);
@@ -145,13 +160,13 @@ export default function ExpenseRequestPage() {
         amount: Number(amount),
         date: new Date().toISOString(),
         status: 'pending',
-        file_url: invUrlData.publicUrl, // הקבלה הראשית
+        file_url: invUrlData.publicUrl,
         details: {
           notes: notes,
           bank_details: finalBankDetails,
           mode: finalMode,
           supplierName: supplierName,
-          bank_confirm_url: bankFileUrl // הלינק לאישור החשבון (אם יש)
+          bank_confirm_url: bankFileUrl
         }
       }]);
 

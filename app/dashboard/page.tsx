@@ -4,9 +4,9 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   ArrowUpRight, ArrowDownLeft, 
-  Clock, XCircle, CheckCircle,
+  XCircle, CheckCircle, Clock,
   Home, List, User, Plus, LogOut, LayoutDashboard,
-  Mail, TrendingUp, TrendingDown 
+  Mail, TrendingUp, TrendingDown, AlertTriangle 
 } from "lucide-react";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -32,20 +32,16 @@ export default function Dashboard() {
 
       // 1. חישוב תאריכים לחודש הקודם
       const now = new Date();
-      // הולכים לחודש הקודם (1 לחודש)
       const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-      // יום אחרון של החודש הקודם
       const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
       
-      // שם החודש הקודם לתצוגה (למשל: "דצמבר 2025")
       const monthName = prevDate.toLocaleDateString('he-IL', { month: 'long', year: 'numeric' });
       setPrevMonthName(monthName);
 
-      // המרת התאריכים לפורמט השוואה (YYYY-MM-DD)
       const startStr = prevDate.toISOString().split('T')[0];
       const endStr = prevMonthEnd.toISOString().split('T')[0];
 
-      // 2. שליפת כל העסקאות המאושרות
+      // 2. שליפת כל העסקאות המאושרות לחישוב יתרה
       const { data: allTx } = await supabase
         .from('transactions')
         .select('amount, type, status, date')
@@ -53,12 +49,10 @@ export default function Dashboard() {
         .eq('status', 'approved');
 
       if (allTx) {
-        // יתרה: סה"כ כל הזמן
         const totalBalance = allTx.reduce((acc, t) => {
           return acc + (t.type === 'income' ? t.amount : -t.amount);
         }, 0);
 
-        // הכנסות/הוצאות: רק של חודש קודם
         const prevIncome = allTx
           .filter(t => t.type === 'income' && t.date >= startStr && t.date <= endStr)
           .reduce((sum, t) => sum + t.amount, 0);
@@ -74,7 +68,7 @@ export default function Dashboard() {
         });
       }
 
-      // 3. שליפת פעולות אחרונות
+      // 3. שליפת פעולות אחרונות (כולל סיבת דחייה ופרטים)
       const { data: recent } = await supabase
         .from('transactions')
         .select('*')
@@ -103,20 +97,33 @@ export default function Dashboard() {
     router.push('/');
   };
 
-  const getTransactionDescription = (t: any) => {
-    if (t.status === 'rejected') {
-       return `נדחה: ${t.rejection_reason || 'לא צוינה סיבה'}`;
+  // פונקציה שמחזירה תאריך עברי
+  const getHebrewDate = (dateStr: string) => {
+    try {
+      return new Date(dateStr).toLocaleDateString('he-IL', { calendar: 'hebrew', day: 'numeric', month: 'long' });
+    } catch (e) {
+      return '';
     }
+  };
+
+  // פונקציה לבניית התיאור המפורט (סעיף 1 ברשימה שלך)
+  const getTransactionDescription = (t: any) => {
+    // אם נדחה - מציגים את הסיבה
+    if (t.status === 'rejected') {
+       return `סיבת הדחייה: ${t.rejection_reason || 'לא צוינה סיבה'}`;
+    }
+    // אם זו הכנסה
     if (t.type === 'income') {
        return `זיכוי עבור: ${t.title}`;
     }
+    // אם זו הוצאה
     return `תשלום לספק: ${t.title}`;
   };
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans flex" dir="rtl">
       
-      {/* --- תפריט צד למחשב (כולל הסטטיסטיקה בצד) --- */}
+      {/* --- תפריט צד למחשב --- */}
       <aside className="hidden md:flex flex-col w-72 bg-slate-900 text-white min-h-screen sticky top-0 h-screen p-6 shadow-2xl z-20">
         <div className="mb-8 flex items-center gap-3">
            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-bold text-xl">ח</div>
@@ -141,7 +148,6 @@ export default function Dashboard() {
            </Link>
         </nav>
 
-        {/* --- כאן הוספנו את הסטטיסטיקה בצד --- */}
         {!loading && (
           <div className="bg-slate-800/50 border border-slate-700 rounded-2xl p-4 mb-4">
              <h3 className="text-xs font-bold text-slate-400 mb-3 border-b border-slate-700 pb-2 uppercase">
@@ -174,7 +180,6 @@ export default function Dashboard() {
       {/* --- תוכן ראשי --- */}
       <main className="flex-1 pb-24 md:pb-10">
         
-        {/* כותרת */}
         <header className="bg-white p-6 md:p-8 shadow-sm border-b border-slate-100 flex justify-between items-center sticky top-0 z-10 md:static">
           <div>
             <h1 className="text-xl md:text-2xl font-black text-slate-800">היי, {userName.split(' ')[0]} 👋</h1>
@@ -187,7 +192,7 @@ export default function Dashboard() {
 
         <div className="p-5 md:p-8 max-w-7xl mx-auto space-y-8">
 
-          {/* כרטיס יתרה גדול ונקי */}
+          {/* כרטיס יתרה */}
           <div className="bg-slate-900 text-white p-8 md:p-12 rounded-[2.5rem] shadow-xl shadow-slate-900/20 relative overflow-hidden group text-center md:text-right">
              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
              <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none"></div>
@@ -197,11 +202,13 @@ export default function Dashboard() {
                 <div className="text-6xl md:text-7xl font-black tracking-tight my-2">
                    ₪{stats.balance.toLocaleString()}
                 </div>
-                <p className="text-slate-500 text-sm mt-4 font-medium opacity-80">מעודכן להיום • {new Date().toLocaleDateString('he-IL')}</p>
+                <p className="text-slate-500 text-sm mt-4 font-medium opacity-80">
+                  {getHebrewDate(new Date().toISOString())} • {new Date().toLocaleDateString('he-IL')}
+                </p>
              </div>
           </div>
 
-          {/* כפתורים מהירים למובייל בלבד */}
+          {/* כפתורים מהירים למובייל */}
           <div className="md:hidden grid grid-cols-2 gap-4">
              <Link href="/dashboard/add/income" className="bg-white p-4 rounded-2xl border shadow-sm flex flex-col items-center gap-2 active:scale-95 transition-transform">
                 <div className="w-10 h-10 bg-green-100 text-green-600 rounded-full flex items-center justify-center"><ArrowDownLeft /></div>
@@ -242,7 +249,7 @@ export default function Dashboard() {
              ) : (
                 <div className="space-y-4">
                    {recentTransactions.map((t) => (
-                      <div key={t.id} className={`p-4 rounded-2xl border flex flex-col gap-2 transition-all ${t.status === 'rejected' ? 'bg-red-50 border-red-100' : 'bg-white border-slate-100 hover:border-slate-300'}`}>
+                      <div key={t.id} className={`p-4 rounded-2xl border flex flex-col gap-2 transition-all ${t.status === 'rejected' ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100 hover:border-slate-300'}`}>
                          
                          <div className="flex justify-between items-start">
                             <div className="flex gap-3 items-center">
@@ -254,10 +261,13 @@ export default function Dashboard() {
                                </div>
                                <div>
                                   <div className="font-bold text-slate-900 text-sm md:text-base">
-                                     {t.status === 'rejected' ? 'הבקשה נדחתה' : t.title}
+                                     {t.type === 'income' ? `זיכוי: ${t.title}` : `חיוב: ${t.title}`}
                                   </div>
                                   <div className="text-xs text-slate-500">
-                                     {new Date(t.date).toLocaleDateString('he-IL')} • {t.status === 'pending' ? 'ממתין לאישור' : (t.status === 'approved' ? 'אושר' : 'נדחה')}
+                                     {/* הצגת תאריך עברי ולועזי */}
+                                     {getHebrewDate(t.date)} • {new Date(t.date).toLocaleDateString('he-IL')} 
+                                     <span className="mx-1">•</span> 
+                                     {t.status === 'pending' ? 'ממתין לאישור' : (t.status === 'approved' ? 'אושר' : 'נדחה')}
                                   </div>
                                </div>
                             </div>
@@ -266,7 +276,11 @@ export default function Dashboard() {
                             </div>
                          </div>
 
-                         <div className="bg-white/50 p-2 rounded-lg text-sm text-slate-700 mt-1">
+                         {/* תיאור מפורט / סיבת דחייה */}
+                         <div className={`p-3 rounded-xl text-sm mt-1 flex items-start gap-2 ${
+                           t.status === 'rejected' ? 'bg-red-100 text-red-900 font-medium' : 'bg-slate-50 text-slate-600'
+                         }`}>
+                            {t.status === 'rejected' && <AlertTriangle size={16} className="shrink-0 mt-0.5" />}
                             {getTransactionDescription(t)}
                          </div>
 
