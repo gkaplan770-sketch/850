@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { 
-  ArrowRight, Check, Users, Camera, 
-  Calendar, FileText, ChevronDown, Smile 
+  ArrowRight, Users, Camera, 
+  Calendar, ChevronDown, Smile 
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from 'next/navigation';
@@ -27,8 +27,7 @@ export default function IncomeReportPage() {
   // טופס
   const [selectedActId, setSelectedActId] = useState('');
   const [participants, setParticipants] = useState('');
-  const [boysCount, setBoysCount] = useState('');
-  const [girlsCount, setGirlsCount] = useState('');
+  const [audience, setAudience] = useState<'boys' | 'girls'>('boys'); // ברירת מחדל: בנים
   const [description, setDescription] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -68,8 +67,6 @@ export default function IncomeReportPage() {
     if (tier) {
       setCalculatedReward(tier.amount);
     } else {
-      // אם לא נמצאה מדרגה (למשל כמות גדולה מדי שלא הוגדרה), אפשר לתת 0 או את המקסימום
-      // כאן ניתן 0 ונודיע למשתמש
       setCalculatedReward(0);
     }
 
@@ -83,15 +80,7 @@ export default function IncomeReportPage() {
     e.preventDefault();
     if (!selectedActId || !imageFile) { alert("חובה לבחור פעילות ולהעלות תמונה"); return; }
     
-    // בדיקת תקינות מספרים
     const total = Number(participants);
-    const boys = Number(boysCount);
-    const girls = Number(girlsCount);
-
-    if (boys + girls > total) {
-       alert("שגיאה: מספר הבנים והבנות ביחד גדול מסך המשתתפים");
-       return;
-    }
 
     setIsSubmitting(true);
 
@@ -117,8 +106,7 @@ export default function IncomeReportPage() {
         details: {
           activity_id: selectedActId,
           participants: total,
-          boys: boys,
-          girls: girls,
+          audience: audience, // כאן נשמר אם זה בנים או בנות
           notes: description,
           calculated_by_system: true
         }
@@ -200,27 +188,32 @@ export default function IncomeReportPage() {
                  </div>
               </div>
 
-              {/* פירוט בנים בנות */}
-              <div className="grid grid-cols-2 gap-4">
-                 <div>
-                    <label className="text-xs font-bold text-slate-400 mb-1 block">מספר בנים</label>
-                    <input 
-                      type="number" 
-                      placeholder="0"
-                      value={boysCount}
-                      onChange={(e) => setBoysCount(e.target.value)}
-                      className="w-full p-3 rounded-xl bg-blue-50/50 border border-blue-100 text-center font-bold outline-none focus:bg-white focus:border-blue-400"
-                    />
-                 </div>
-                 <div>
-                    <label className="text-xs font-bold text-slate-400 mb-1 block">מספר בנות</label>
-                    <input 
-                      type="number" 
-                      placeholder="0"
-                      value={girlsCount}
-                      onChange={(e) => setGirlsCount(e.target.value)}
-                      className="w-full p-3 rounded-xl bg-pink-50/50 border border-pink-100 text-center font-bold outline-none focus:bg-white focus:border-pink-400"
-                    />
+              {/* כפתורי בחירה - בנים / בנות */}
+              <div>
+                 <label className="text-xs font-bold text-slate-500 mb-2 block">מי היה הקהל?</label>
+                 <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setAudience('boys')}
+                      className={`p-3 rounded-xl font-bold transition-all ${
+                        audience === 'boys' 
+                          ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' 
+                          : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                      }`}
+                    >
+                       בנים
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAudience('girls')}
+                      className={`p-3 rounded-xl font-bold transition-all ${
+                        audience === 'girls' 
+                          ? 'bg-pink-600 text-white shadow-lg shadow-pink-200' 
+                          : 'bg-slate-100 text-slate-400 hover:bg-slate-200'
+                      }`}
+                    >
+                       בנות
+                    </button>
                  </div>
               </div>
 

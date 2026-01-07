@@ -10,8 +10,9 @@ import {
   CreditCard, 
   LogOut,
   ShieldCheck,
-  Tags,   // <--- הוספנו את זה
-  Scale   // <--- הוספנו את זה
+  Tags,
+  Scale,
+  Activity // הוספתי את האייקון הזה
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -22,6 +23,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       name: 'לוח בקרה', 
       href: '/admin/dashboard', 
       icon: <LayoutDashboard size={20} /> 
+    },
+    { 
+      name: 'סטטיסטיקה', // הוספתי את הקישור הזה שביקשת
+      href: '/admin/overview', 
+      icon: <Activity size={20} /> 
     },
     { 
       name: 'ניהול שלוחים', 
