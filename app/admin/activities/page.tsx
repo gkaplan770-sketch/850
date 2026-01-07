@@ -28,7 +28,7 @@ interface ActivityType {
   category: string;
   tiers: Tier[];
   custom_fields: CustomField[];
-  image_required: boolean; // שדה חדש: האם תמונה חובה
+  image_required: boolean;
 }
 
 // --- Helper for Random ID ---
@@ -45,7 +45,7 @@ export default function ActivityTypesPage() {
     category: 'regular',
     tiers: [] as Tier[],
     custom_fields: [] as CustomField[],
-    image_required: true // ברירת מחדל: תמונה חובה
+    image_required: true 
   });
 
   const fetchActivities = async () => {
@@ -53,6 +53,8 @@ export default function ActivityTypesPage() {
     const { data, error } = await supabase.from('activity_types').select('*').order('name');
     if (error) {
       console.error("Error fetching activities:", error);
+      // גם כאן נציג שגיאה אם יש בעיה בשליפה
+      // alert("שגיאה בטעינת נתונים: " + error.message);
     } else {
       setActivities(data || []);
     }
@@ -88,9 +90,10 @@ export default function ActivityTypesPage() {
       
       setIsModalOpen(false);
       fetchActivities();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("שגיאה בשמירת הנתונים. נסה שוב.");
+      // --- התיקון: הצגת השגיאה האמיתית למשתמש ---
+      alert("שגיאה בשמירה:\n" + (err.message || JSON.stringify(err)));
     }
   };
 
@@ -98,7 +101,7 @@ export default function ActivityTypesPage() {
     if (confirm("האם למחוק סוג פעילות זה?")) {
       const { error } = await supabase.from('activity_types').delete().eq('id', id);
       if (error) {
-        alert("לא ניתן למחוק פעילות שיש לה דיווחים מקושרים.");
+        alert("לא ניתן למחוק: " + error.message);
       } else {
         fetchActivities();
       }
@@ -113,7 +116,7 @@ export default function ActivityTypesPage() {
         category: item.category,
         tiers: item.tiers || [],
         custom_fields: item.custom_fields || [],
-        image_required: item.image_required !== false // אם זה null או undefined נניח שזה true
+        image_required: item.image_required !== false
       });
     } else {
       setEditingItem(null);
@@ -148,7 +151,7 @@ export default function ActivityTypesPage() {
       setFormData({ ...formData, tiers: newTiers });
   };
 
-  // --- ניהול שדות מותאמים אישית (שאלות) ---
+  // --- ניהול שדות מותאמים אישית ---
   const addField = () => {
     const newField: CustomField = {
       id: generateId(),
@@ -206,7 +209,6 @@ export default function ActivityTypesPage() {
                   </div>
                </div>
                
-               {/* תצוגה מקוצרת של מדרגות */}
                <div className="bg-slate-50 rounded-xl p-3 mt-auto">
                    <p className="text-xs font-bold text-slate-400 mb-2 uppercase tracking-wide">מחירון (לפי משתתפים):</p>
                    <div className="space-y-1">
@@ -235,7 +237,6 @@ export default function ActivityTypesPage() {
               
               <div className="overflow-y-auto flex-1 p-6 space-y-8 bg-slate-50/50">
                   
-                  {/* פרטים כלליים */}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
                         <div>
                             <label className="text-xs font-bold text-slate-500 mb-1 block">שם הפעילות</label>
@@ -261,10 +262,7 @@ export default function ActivityTypesPage() {
                   </div>
 
                   <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    
-                    {/* עמודה ימנית: שאלות ונתונים */}
                     <div className="space-y-6">
-                        {/* שדות קבועים */}
                         <div className="bg-slate-100 p-4 rounded-2xl border border-slate-200 opacity-70">
                             <h3 className="text-sm font-bold text-slate-600 mb-3 flex items-center gap-2">
                                 <CheckSquare size={16} /> שדות חובה גלובליים (קבוע)
@@ -275,7 +273,6 @@ export default function ActivityTypesPage() {
                             </div>
                         </div>
 
-                        {/* שדות מותאמים אישית */}
                         <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
                             <div className="flex justify-between items-center mb-4">
                                 <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
@@ -321,7 +318,6 @@ export default function ActivityTypesPage() {
                         </div>
                     </div>
 
-                    {/* עמודה שמאלית: מדרגות שכר */}
                     <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm h-fit">
                         <div className="flex justify-between items-center mb-3">
                             <label className="text-sm font-bold text-slate-700 flex items-center gap-2">

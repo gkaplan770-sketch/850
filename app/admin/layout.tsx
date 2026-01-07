@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation'; // הוספנו את useRouter
 import { 
   LayoutDashboard, 
   Users, 
@@ -12,11 +12,17 @@ import {
   ShieldCheck,
   Tags,
   Scale,
-  Activity // האייקון לסטטיסטיקה
+  Activity 
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter(); // שימוש בראוטר להפניה
+
+  // אם אנחנו בדף ה-login, נחזיר רק את התוכן נקי, בלי המסגרת של האדמין
+  if (pathname === '/admin/login') {
+    return <>{children}</>;
+  }
 
   const menuItems = [
     { 
@@ -25,7 +31,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       icon: <LayoutDashboard size={20} /> 
     },
     { 
-      name: 'סטטיסטיקה', // הוספנו את זה כדי שהלשונית תופיע
+      name: 'סטטיסטיקה', 
       href: '/admin/overview', 
       icon: <Activity size={20} /> 
     },
@@ -55,6 +61,14 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       icon: <FileText size={20} /> 
     },
   ];
+
+  // --- פונקציית יציאה מסודרת ---
+  const handleLogout = () => {
+    // מחיקת הקוקי של האדמין
+    document.cookie = "admin-auth=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
+    // הפניה לדף הכניסה של האדמין
+    router.push('/admin/login');
+  };
 
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans" dir="rtl">
@@ -94,12 +108,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
            })}
         </nav>
 
-        {/* כפתור יציאה */}
+        {/* כפתור יציאה - שונה מכפתור לקישור עם פעולה */}
         <div className="p-4 border-t border-slate-800">
-           <Link href="/" className="flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition-all font-bold">
+           <button 
+             onClick={handleLogout} 
+             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition-all font-bold"
+           >
               <LogOut size={20} />
-              <span>יציאה למסך ראשי</span>
-           </Link>
+              <span>יציאה למסך כניסה</span>
+           </button>
         </div>
 
       </aside>
