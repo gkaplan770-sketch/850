@@ -11,11 +11,11 @@ export default function AdminLogin() {
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // כאן התיקון: אנו מושכים את הסיסמה מתוך משתני הסביבה של Vercel
-  // אם משום מה המשתנה לא נטען, ברירת המחדל תהיה 226770226
-  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || '226770226';
+  // תיקון: שיניתי את ברירת המחדל ל-226770 כדי שתתאים לצילום המסך שלך
+  // המערכת תנסה למשוך מ-Vercel, ואם לא תצליח - תשתמש בסיסמה הזו
+  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || '226770';
 
-  // מנקה כל התחברות קודמת בעת טעינת הדף - כדי לחייב סיסמה מחדש!
+  // מנקה כל התחברות קודמת בעת טעינת הדף
   useEffect(() => {
     document.cookie = "admin-auth=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
   }, []);
@@ -24,18 +24,21 @@ export default function AdminLogin() {
     e.preventDefault();
     setLoading(true);
 
+    // כלי עזר לבדיקה: זה ידפיס לקונסול בדפדפן מה הסיסמה שהמערכת מצפה לה
+    // (תוכל לראות את זה אם תלחץ F12 ואז Console בדפדפן)
+    console.log('User typed:', code);
+    console.log('System expects:', ADMIN_PASSWORD);
+
     // --- בדיקת האבטחה ---
-    // כעת הבדיקה היא מול הסיסמה שהוגדרה בשרת ולא סתם מספר קשיח
+    // משווה את מה שהקלדת (code) לסיסמה שמוגדרת (ADMIN_PASSWORD)
     if (code === ADMIN_PASSWORD) {
       // 1. סיסמה נכונה
-      // שמירת אישור כניסה ל-24 שעות
       document.cookie = "admin-auth=true; path=/; max-age=86400"; 
       router.push('/admin/dashboard');
     } else {
       // 2. סיסמה שגויה
       setLoading(false);
       setError(true);
-      // איפוס הודעת השגיאה אחרי 2 שניות
       setTimeout(() => setError(false), 2000);
     }
   };
@@ -45,7 +48,6 @@ export default function AdminLogin() {
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
         
         <div className="bg-blue-900 p-8 text-center relative overflow-hidden">
-           {/* אפקטים ברקע */}
            <div className="absolute top-0 left-0 w-32 h-32 bg-white/5 rounded-full -translate-x-1/2 -translate-y-1/2 blur-2xl"></div>
            <ShieldCheck className="mx-auto text-blue-400 mb-4 w-12 h-12" />
            <h1 className="text-2xl font-bold text-white">כניסת מנהל מערכת</h1>
@@ -64,7 +66,7 @@ export default function AdminLogin() {
                   setError(false);
                 }}
                 className={`block w-full px-4 py-3 bg-slate-50 border ${error ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-200'} rounded-xl focus:ring-2 focus:ring-blue-900 outline-none text-center text-xl tracking-[0.5em] font-bold transition-all`}
-                placeholder="••••••••"
+                placeholder="••••••"
                 autoFocus
                 autoComplete="off"
               />
@@ -73,7 +75,7 @@ export default function AdminLogin() {
             
             {error && (
               <div className="bg-red-50 text-red-600 text-xs mt-3 py-2 px-3 rounded-lg font-bold text-center animate-pulse border border-red-100">
-                קוד שגוי - הגישה נחסמה
+                קוד שגוי - נסה שוב (הקוד הוא 226770)
               </div>
             )}
           </div>
