@@ -20,20 +20,14 @@ export default function AdminLogin() {
     document.cookie = "admin-auth=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    // כלי עזר לבדיקה: זה ידפיס לקונסול בדפדפן מה הסיסמה שהמערכת מצפה לה
-    // (תוכל לראות את זה אם תלחץ F12 ואז Console בדפדפן)
-    console.log('User typed:', code);
-    console.log('System expects:', ADMIN_PASSWORD);
-
-    // --- בדיקת האבטחה ---
-    // משווה את מה שהקלדת (code) לסיסמה שמוגדרת (ADMIN_PASSWORD)
+    // בדיקת האבטחה
     if (code === ADMIN_PASSWORD) {
-      // 1. סיסמה נכונה
-      document.cookie = "admin-auth=true; path=/; max-age=86400"; 
+      // 1. סיסמה נכונה - שינינו כאן ל-admin_token
+      document.cookie = "admin_token=true; path=/; max-age=86400"; 
       router.push('/admin/dashboard');
     } else {
       // 2. סיסמה שגויה
