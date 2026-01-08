@@ -4,12 +4,18 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   FileText, Download, RefreshCw, 
-  Archive, DollarSign, Package, CheckSquare, Square
+  Archive, DollarSign, CheckSquare, Square,
+  FileSpreadsheet
 } from "lucide-react";
 import JSZip from 'jszip';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
+import { 
+  Document, Packer, Paragraph, TextRun, HeadingLevel, 
+  Table, TableRow, TableCell, WidthType, BorderStyle, AlignmentType 
+} from "docx";
 
+// --- ממשקים ---
 interface Transaction {
   id: string;
   created_at: string;
@@ -33,16 +39,17 @@ export default function AccountingPage() {
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'supplier_exist' | 'supplier_new' | 'refund'>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
+  // --- 1. שליפת נתונים וסינון חכם ---
   const fetchTransactions = async () => {
     setLoading(true);
-    // מביא רק עסקאות שאושרו
     let query = supabase
       .from('transactions')
       .select('*, users(first_name, last_name, branch_name)')
       .eq('status', 'approved')
+      .eq('type', 'expense') // מביא רק הוצאות (לא הכנסות/פעילויות)
+      .order('users(branch_name)', { ascending: true }) 
       .order('date', { ascending: false });
 
-    // סינון לפי סטטוס ייצוא
     if (viewMode === 'new') {
       query = query.eq('is_exported', false);
     } else {
@@ -51,153 +58,298 @@ export default function AccountingPage() {
 
     const { data, error } = await query;
     if (!error) {
-      setTransactions(data || []);
+      // --- התיקון: סינון מתקדם בתוך הדפדפן ---
+      // אנחנו מעיפים כל מה שהוא לא בקשה ישירה של שליח
+      const filtered = (data || []).filter((t: any) => {
+          const d = t.details || {};
+          
+          // רשימת מצבים שאנחנו רוצים להסתיר (כי הם לא בקשות שליח לאישור)
+          const adminModes = [
+              'subscription_charge', // חיוב מנוי אוטומטי
+              'manual_admin_action', // פעולה ידנית של מנהל
+              'bulk_excel_import',   // ייבוא אקסל מרוכז
+              'manual_debit'         // חיוב ידני
+          ];
+
+          // אם המצב הוא אחד מאלו - דלג עליו
+          if (adminModes.includes(d.mode)) return false;
+          
+          // אם זה סוג "manual_debit" במסד (לפעמים נשמר כך) - דלג
+          if (t.type === 'manual_debit') return false;
+
+          return true; // זו בקשה תקינה
+      });
+
+      // מיון לפי שם סניף (למקרה שהמיון מהשרת לא תפס בגלל ה-Join)
+      const sortedData = filtered.sort((a: any, b: any) => 
+         (a.users?.branch_name || '').localeCompare(b.users?.branch_name || '')
+      );
+      
+      setTransactions(sortedData);
       setSelectedIds(new Set());
     }
     setLoading(false);
   };
 
-  useEffect(() => {
-    fetchTransactions();
-  }, [viewMode]);
+  useEffect(() => { fetchTransactions(); }, [viewMode]);
 
-  // --- הלוגיקה הקובעת: איזה סוג עסקה זה? ---
+  // --- עזרים ---
   const getTransactionCategory = (t: Transaction) => {
-    // 1. החזר הוצאות
     if (t.details?.mode === 'refund') return 'refund';
-    
-    // 2. ספק (חדש או קיים)
     if (t.details?.mode === 'supplier') {
-        // אם יש פרטי חשבון בנק מלאים -> זה ספק חדש
-        if (t.details?.bank_details?.accountNumber && t.details?.bank_details?.bankNumber) {
-            return 'supplier_new';
-        }
-        // אחרת -> ספק קיים
+        if (t.details?.bank_details?.accountNumber) return 'supplier_new';
         return 'supplier_exist'; 
     }
-    
-    // ברירת מחדל
-    return 'supplier_exist';
+    // ברירת מחדל: אם זה הוצאה רגילה בלי מוד מוגדר, נניח שזה ספק קיים
+    return 'supplier_exist'; 
   };
 
-  // סינון הרשימה לפי הטאב שנבחר
+  const getTypeHebrew = (cat: string) => {
+      switch(cat) {
+          case 'refund': return 'החזר הוצאות';
+          case 'supplier_new': return 'ספק חדש';
+          case 'supplier_exist': return 'ספק קיים';
+          default: return 'כללי';
+      }
+  };
+
+  const cleanText = (str: string) => str.replace(/[^a-zA-Z0-9א-ת -]/g, "").trim();
+
+  // סינון לפי הטאבים למעלה
   const filteredData = transactions.filter(t => {
     const cat = getTransactionCategory(t);
     if (categoryFilter === 'all') return true;
     return cat === categoryFilter;
   });
 
-  // בחירה מרובה
+  // בחירה
   const toggleSelect = (id: string) => {
     const newSet = new Set(selectedIds);
-    if (newSet.has(id)) newSet.delete(id);
-    else newSet.add(id);
+    if (newSet.has(id)) newSet.delete(id); else newSet.add(id);
     setSelectedIds(newSet);
   };
 
   const selectAll = () => {
-    if (selectedIds.size === filteredData.length) {
-      setSelectedIds(new Set());
-    } else {
-      const ids = filteredData.map(t => t.id);
-      setSelectedIds(new Set(ids));
-    }
+    if (selectedIds.size === filteredData.length) setSelectedIds(new Set());
+    else setSelectedIds(new Set(filteredData.map(t => t.id)));
   };
 
-  // --- ייצוא ל-ZIP + Excel ---
+  // --- המנוע הראשי: ייצוא ---
   const handleExport = async () => {
     if (selectedIds.size === 0) return;
     setExporting(true);
 
     try {
-      const zip = new JSZip();
-      const excelRows: any[] = [];
-      const dateStr = new Date().toLocaleDateString('he-IL').replace(/\./g, '-');
-      const folderName = `הנהלת_חשבונות_${dateStr}`;
-      const imgFolder = zip.folder("קבצים");
-
       const itemsToExport = transactions.filter(t => selectedIds.has(t.id));
+      const dateStr = new Date().toLocaleDateString('he-IL').replace(/\./g, '-');
+      const zip = new JSZip();
+      
+      // --- שלב א: קיבוץ לפי סניפים ---
+      const groupedByBranch: Record<string, Transaction[]> = {};
+      itemsToExport.forEach(t => {
+          const branch = t.users?.branch_name || 'כללי';
+          if (!groupedByBranch[branch]) groupedByBranch[branch] = [];
+          groupedByBranch[branch].push(t);
+      });
 
+      // --- שלב ב: יצירת אקסל במבנה המבוקש ---
+      const excelRows: any[] = [];
+      const excelHeader = ["תאריך", "שם הספק/העסק", "סוג", "שם השליח", "הערות", "סכום"];
+
+      // מעבר על כל סניף
+      Object.keys(groupedByBranch).sort().forEach(branch => {
+          const branchItems = groupedByBranch[branch];
+          let branchTotal = 0;
+
+          // כותרת סניף
+          excelRows.push(["", "", "", "", "", ""]); // רווח
+          excelRows.push([`סניף: ${branch}`, "", "", "", "", ""]); // כותרת
+          excelRows.push(excelHeader);
+
+          branchItems.forEach(t => {
+              const cat = getTransactionCategory(t);
+              const typeHeb = getTypeHebrew(cat);
+              branchTotal += t.amount;
+
+              excelRows.push([
+                  new Date(t.date).toLocaleDateString('he-IL'),
+                  t.title,
+                  typeHeb,
+                  `${t.users?.first_name} ${t.users?.last_name}`,
+                  t.details?.notes || '',
+                  t.amount
+              ]);
+          });
+
+          // שורת סיכום לסניף
+          excelRows.push(["", "", "", "", `סה"כ לסניף ${branch}:`, branchTotal]);
+          excelRows.push([]); // שורה ריקה להפרדה
+      });
+
+      const worksheet = XLSX.utils.aoa_to_sheet(excelRows);
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "דוח מרוכז");
+      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+      zip.file(`דוח_הנהח_${dateStr}.xlsx`, excelBuffer);
+
+
+      // --- שלב ג: יצירת מסמך Word (Docx) ---
+      const docChildren: any[] = [];
+
+      docChildren.push(
+          new Paragraph({
+              text: `דוח הוצאות וספקים - ${dateStr}`,
+              heading: HeadingLevel.HEADING_1,
+              alignment: AlignmentType.CENTER,
+          }),
+          new Paragraph({ text: "" }) // רווח
+      );
+
+      Object.keys(groupedByBranch).sort().forEach(branch => {
+          const branchItems = groupedByBranch[branch];
+          let branchTotal = 0;
+
+          // כותרת הסניף
+          docChildren.push(
+              new Paragraph({
+                  text: `סניף: ${branch}`,
+                  heading: HeadingLevel.HEADING_2,
+                  thematicBreak: true, // קו מפריד מעל
+                  spacing: { before: 400, after: 200 }
+              })
+          );
+
+          // יצירת שורות לטבלה של הסניף
+          const tableRows = [
+              new TableRow({
+                  children: [
+                      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "ספק / עסק", bold: true })] })] }),
+                      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "סוג", bold: true })] })] }),
+                      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "פרטים / בנק", bold: true })] })] }),
+                      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: "סכום", bold: true })] })] }),
+                  ],
+              })
+          ];
+
+          branchItems.forEach(t => {
+              branchTotal += t.amount;
+              const cat = getTransactionCategory(t);
+              let detailsText = t.details?.notes || "-";
+
+              // אם זה ספק חדש - מוסיפים פרטי בנק
+              if (cat === 'supplier_new' && t.details?.bank_details) {
+                  const bd = t.details.bank_details;
+                  detailsText += `\nבנק: ${bd.bank_name} (${bd.branch})\nח-ן: ${bd.account}\nמוטב: ${bd.owner_name}`;
+              }
+
+              tableRows.push(
+                  new TableRow({
+                      children: [
+                          new TableCell({ children: [new Paragraph(t.title)] }),
+                          new TableCell({ children: [new Paragraph(getTypeHebrew(cat))] }),
+                          new TableCell({ children: [new Paragraph(detailsText)] }),
+                          new TableCell({ children: [new Paragraph(`₪${t.amount}`)] }),
+                      ],
+                  })
+              );
+          });
+
+          // שורת סיכום בטבלה
+          tableRows.push(
+            new TableRow({
+                children: [
+                    new TableCell({ children: [new Paragraph("")] }),
+                    new TableCell({ children: [new Paragraph("")] }),
+                    new TableCell({ children: [new Paragraph("סה\"כ:")] }),
+                    new TableCell({ 
+                        children: [
+                            new Paragraph({
+                                children: [
+                                    new TextRun({
+                                        text: `₪${branchTotal}`,
+                                        bold: true,
+                                    }),
+                                ],
+                            })
+                        ] 
+                    }),
+                ],
+            })
+          );
+
+          docChildren.push(
+              new Table({
+                  rows: tableRows,
+                  width: { size: 100, type: WidthType.PERCENTAGE },
+                  borders: {
+                      top: { style: BorderStyle.SINGLE, size: 1 },
+                      bottom: { style: BorderStyle.SINGLE, size: 1 },
+                      left: { style: BorderStyle.NONE, size: 0 },
+                      right: { style: BorderStyle.NONE, size: 0 },
+                      insideHorizontal: { style: BorderStyle.DOTTED, size: 1 },
+                      insideVertical: { style: BorderStyle.NONE, size: 0 },
+                  }
+              }),
+              new Paragraph({ text: "" })
+          );
+      });
+
+      const doc = new Document({
+          sections: [{
+              properties: {},
+              children: docChildren,
+          }],
+      });
+
+      const docBuffer = await Packer.toBlob(doc);
+      zip.file(`פירוט_ספקים_דוקס_${dateStr}.docx`, docBuffer);
+
+
+      // --- שלב ד: הורדת תמונות ושינוי שמות ---
+      const imgFolder = zip.folder("קבלות_ואישורים");
+      
       for (const t of itemsToExport) {
-        const category = getTransactionCategory(t);
-        let catName = 'כללי';
-        if (category === 'refund') catName = 'החזר_הוצאות';
-        if (category === 'supplier_new') catName = 'ספק_חדש';
-        if (category === 'supplier_exist') catName = 'ספק_קיים';
+          const category = getTransactionCategory(t);
+          const typeHeb = getTypeHebrew(category).replace(" ", "_");
+          const safeSupplier = cleanText(t.title);
+          const safeBranch = cleanText(t.users?.branch_name || 'כללי');
+          const cleanDate = t.date; // YYYY-MM-DD
 
-        // 1. בניית שורה לאקסל
-        const rowData: any = {
-          'תאריך': new Date(t.date).toLocaleDateString('he-IL'),
-          'סניף': t.users?.branch_name || '',
-          'שם השליח': `${t.users?.first_name} ${t.users?.last_name}`,
-          'סוג': catName.replace('_', ' '),
-          'שם ספק/עסק': t.title,
-          'סכום': t.amount,
-          'הערות': t.details?.notes || '',
-        };
+          // פורמט שם קובץ: [שם ספק]_[סוג]_[תאריך]_[שם סניף].jpg
+          const baseFileName = `${safeSupplier}_${typeHeb}_${cleanDate}_${safeBranch}`;
 
-        // הוספת פרטי בנק לאקסל (אם יש)
-        if (t.details?.bank_details?.accountNumber) {
-            rowData['שם מוטב'] = t.details.bank_details.ownerName;
-            rowData['בנק'] = t.details.bank_details.bankNumber;
-            rowData['סניף'] = t.details.bank_details.branchNumber;
-            rowData['חשבון'] = t.details.bank_details.accountNumber;
-        }
-
-        excelRows.push(rowData);
-
-        // 2. הורדת תמונות והוספה ל-ZIP
-        // קובץ ראשי (חשבונית)
-        if (t.file_url && imgFolder) {
-          try {
-            const safeTitle = t.title.replace(/[^a-zA-Z0-9א-ת]/g, "_");
-            const fileName = `${catName}_${safeTitle}_${t.amount}SH_${t.id.slice(0,4)}.jpg`;
-            const response = await fetch(t.file_url);
-            const blob = await response.blob();
-            imgFolder.file(fileName, blob);
-          } catch (err) {
-            console.error("שגיאה בהורדת קובץ", t.id);
+          // 1. קבלה ראשית
+          if (t.file_url && imgFolder) {
+              try {
+                  const response = await fetch(t.file_url);
+                  const blob = await response.blob();
+                  imgFolder.file(`${baseFileName}_קבלה.jpg`, blob);
+              } catch (e) { console.error("Error fetching img", t.id); }
           }
-        }
 
-        // קובץ משני (אישור בנק - אם קיים)
-        if (t.details?.bank_confirm_url && imgFolder) {
-           try {
-             const safeTitle = t.title.replace(/[^a-zA-Z0-9א-ת]/g, "_");
-             const fileName = `אישור_בנק_${safeTitle}_${t.id.slice(0,4)}.jpg`;
-             const response = await fetch(t.details.bank_confirm_url);
-             const blob = await response.blob();
-             imgFolder.file(fileName, blob);
-           } catch (err) {
-             console.error("שגיאה בהורדת אישור בנק", t.id);
-           }
-        }
+          // 2. אישור בנק (אם יש)
+          if (category === 'supplier_new' && t.details?.bank_details?.proof_url && imgFolder) {
+              try {
+                  const response = await fetch(t.details.bank_details.proof_url);
+                  const blob = await response.blob();
+                  imgFolder.file(`${baseFileName}_אישור_בנק.jpg`, blob);
+              } catch (e) { console.error("Error fetching bank proof", t.id); }
+          }
       }
 
-      // 3. יצירת אקסל
-      const worksheet = XLSX.utils.json_to_sheet(excelRows);
-      const workbook = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(workbook, worksheet, "נתונים");
-      const excelBuffer = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
-      
-      zip.file(`דוח_מרכז_${dateStr}.xlsx`, excelBuffer);
-
-      // 4. שמירת ה-ZIP במחשב
+      // --- סיום ושמירה ---
       const content = await zip.generateAsync({ type: "blob" });
-      saveAs(content, `${folderName}.zip`);
+      saveAs(content, `הנהלת_חשבונות_חבד_לנוער_${dateStr}.zip`);
 
-      // 5. עדכון ב-DB שהקבצים יוצאו
-      await supabase
-        .from('transactions')
-        .update({ is_exported: true })
-        .in('id', Array.from(selectedIds));
-
-      alert("הייצוא הסתיים בהצלחה!");
-      await fetchTransactions(); // רענון הטבלה
+      // עדכון ב-DB שהקבצים יוצאו
+      await supabase.from('transactions').update({ is_exported: true }).in('id', Array.from(selectedIds));
+      
+      alert("הייצוא בוצע בהצלחה!");
+      fetchTransactions();
 
     } catch (err) {
       console.error(err);
-      alert("אירעה שגיאה בייצוא.");
+      alert("שגיאה בתהליך הייצוא");
     } finally {
       setExporting(false);
     }
@@ -213,13 +365,12 @@ export default function AccountingPage() {
   return (
     <div className="space-y-6 pb-20">
       
-      {/* כותרת עליונה */}
       <div className="flex justify-between items-center bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
          <div>
             <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                <DollarSign className="text-blue-600" /> הנהלת חשבונות
             </h1>
-            <p className="text-slate-500 text-sm mt-1">ייצוא מרוכז וניהול הוצאות</p>
+            <p className="text-slate-500 text-sm mt-1">ייצוא חכם לרואה חשבון (Excel + Word + תמונות)</p>
          </div>
          
          <div className="bg-slate-100 p-1 rounded-xl flex">
@@ -232,9 +383,8 @@ export default function AccountingPage() {
          </div>
       </div>
 
-      {/* סרגל כלים וסינון */}
       <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0">
+         <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 w-full md:w-auto">
             <button onClick={() => setCategoryFilter('all')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${categoryFilter === 'all' ? 'bg-slate-900 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}>הכל</button>
             <button onClick={() => setCategoryFilter('supplier_exist')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${categoryFilter === 'supplier_exist' ? 'bg-blue-600 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}>ספקים קיימים</button>
             <button onClick={() => setCategoryFilter('supplier_new')} className={`px-4 py-2 rounded-full text-sm font-bold whitespace-nowrap ${categoryFilter === 'supplier_new' ? 'bg-orange-500 text-white' : 'bg-white text-slate-600 border border-slate-200'}`}>ספקים חדשים</button>
@@ -242,8 +392,8 @@ export default function AccountingPage() {
          </div>
 
          {selectedIds.size > 0 && viewMode === 'new' && (
-             <button onClick={handleExport} disabled={exporting} className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-bold shadow-lg flex items-center gap-2 transition-all">
-                {exporting ? "מעבד..." : <><Download size={18} /> הורד ZIP + Excel</>}
+             <button onClick={handleExport} disabled={exporting} className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-lg font-bold shadow-lg flex items-center gap-2 transition-all active:scale-95">
+                {exporting ? "מעבד ומייצא..." : <><Download size={18} /> הפק דוחות והורד</>}
              </button>
          )}
          {selectedIds.size > 0 && viewMode === 'archived' && (
@@ -253,7 +403,6 @@ export default function AccountingPage() {
          )}
       </div>
 
-      {/* טבלת נתונים */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
          {loading ? (
             <div className="p-20 text-center text-slate-400">טוען נתונים...</div>
@@ -266,7 +415,7 @@ export default function AccountingPage() {
                      <tr>
                         <th className="px-6 py-4 w-12"><input type="checkbox" onChange={selectAll} checked={selectedIds.size === filteredData.length && filteredData.length > 0} className="w-4 h-4" /></th>
                         <th className="px-6 py-4">תאריך</th>
-                        <th className="px-6 py-4">שליח</th>
+                        <th className="px-6 py-4">סניף ושליח</th>
                         <th className="px-6 py-4">סוג</th>
                         <th className="px-6 py-4">נושא / ספק</th>
                         <th className="px-6 py-4">סכום</th>
@@ -285,19 +434,19 @@ export default function AccountingPage() {
                              </td>
                              <td className="px-6 py-4 text-sm font-medium">{new Date(t.date).toLocaleDateString('he-IL')}</td>
                              <td className="px-6 py-4">
-                                <div className="font-bold text-slate-800">{t.users?.first_name} {t.users?.last_name}</div>
-                                <div className="text-xs text-slate-500">{t.users?.branch_name}</div>
+                                <div className="text-xs text-slate-500 font-bold mb-0.5">{t.users?.branch_name}</div>
+                                <div className="font-bold text-slate-800 text-sm">{t.users?.first_name} {t.users?.last_name}</div>
                              </td>
                              <td className="px-6 py-4">
-                                {cat === 'refund' && <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-xs font-bold">החזר הוצאות</span>}
-                                {cat === 'supplier_new' && <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-xs font-bold">ספק חדש</span>}
-                                {cat === 'supplier_exist' && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold">ספק קיים</span>}
+                                {cat === 'refund' && <span className="bg-purple-100 text-purple-700 px-2 py-1 rounded text-[10px] font-bold">החזר</span>}
+                                {cat === 'supplier_new' && <span className="bg-orange-100 text-orange-700 px-2 py-1 rounded text-[10px] font-bold">ספק חדש</span>}
+                                {cat === 'supplier_exist' && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-[10px] font-bold">ספק קיים</span>}
                              </td>
-                             <td className="px-6 py-4 font-medium">{t.title}</td>
+                             <td className="px-6 py-4 font-medium text-sm">{t.title}</td>
                              <td className="px-6 py-4 font-bold text-slate-900">₪{t.amount.toLocaleString()}</td>
                              <td className="px-6 py-4 flex gap-2">
-                                {t.file_url && <a href={t.file_url} target="_blank" className="text-blue-600 hover:underline text-xs font-bold flex items-center gap-1"><FileText size={14} /> קבלה</a>}
-                                {t.details?.bank_confirm_url && <a href={t.details.bank_confirm_url} target="_blank" className="text-orange-600 hover:underline text-xs font-bold flex items-center gap-1"><FileText size={14} /> אישור בנק</a>}
+                                {t.file_url && <a href={t.file_url} target="_blank" className="text-blue-600 hover:underline text-[10px] font-bold flex items-center gap-1"><FileText size={12} /> קבלה</a>}
+                                {t.details?.bank_details?.proof_url && <a href={t.details.bank_details.proof_url} target="_blank" className="text-orange-600 hover:underline text-[10px] font-bold flex items-center gap-1"><FileText size={12} /> בנק</a>}
                              </td>
                           </tr>
                         );

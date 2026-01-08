@@ -7,16 +7,14 @@ import {
   LayoutDashboard, Users, FileText, Settings, 
   LogOut, Menu, X, MessageSquare, Image,
   CreditCard, 
-  Wallet      
+  Wallet,
+  Database // <--- הוספנו את הייבוא החסר כאן
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  
-  // הסרנו את isAuthorized ואת ה-useEffect של הבדיקה.
-  // ה-Middleware כבר עושה את העבודה הזו.
 
   const handleLogout = () => {
     // מחיקת הקוקי בצורה אגרסיבית
@@ -32,18 +30,22 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
      return <>{children}</>;
   }
 
-const menuItems = [
-  { name: "לוח בקרה", href: "/admin", icon: LayoutDashboard },
-  { name: "סטטיסטיקות", href: "/admin/overview", icon: LayoutDashboard }, 
-  { name: "שלוחים", href: "/admin/users", icon: Users },
-  { name: "פעילויות", href: "/admin/activities", icon: FileText },
-  { name: "הנהלת חשבונות", href: "/admin/accounting", icon: FileText }, 
-  { name: "גלריית תמונות", href: "/admin/photos", icon: Image },
-  { name: "הודעות", href: "/admin/messages", icon: MessageSquare },
-  { name: "ניהול מנויים", href: "/admin/subscriptions", icon: CreditCard },
-  { name: "זיכוי/חיוב ידני", href: "/admin/manual-balance", icon: Wallet },
-  // מחקנו את הגדרות מכאן
-];
+  const menuItems = [
+    { name: "לוח בקרה", href: "/admin", icon: LayoutDashboard },
+    { name: "סטטיסטיקות", href: "/admin/overview", icon: LayoutDashboard },
+    
+    // --- לשונית הנתונים החדשה ---
+    { name: "מרכז נתונים", href: "/admin/data", icon: Database }, 
+    // ---------------------------
+
+    { name: "שלוחים", href: "/admin/users", icon: Users },
+    { name: "פעילויות", href: "/admin/activities", icon: FileText },
+    { name: "הנהלת חשבונות", href: "/admin/accounting", icon: FileText }, 
+    { name: "גלריית תמונות", href: "/admin/photos", icon: Image },
+    { name: "הודעות", href: "/admin/messages", icon: MessageSquare },
+    { name: "ניהול מנויים", href: "/admin/subscriptions", icon: CreditCard },
+    { name: "זיכוי/חיוב ידני", href: "/admin/manual-balance", icon: Wallet },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans" dir="rtl">
