@@ -5,10 +5,10 @@ import { redirect } from 'next/navigation'
 
 export async function verifyLogin(code: string) {
   console.log("--- Login Attempt Started ---");
-  console.log("Input Code:", code);
+  
   
   const envPassword = process.env.ADMIN_PASSWORD;
-  console.log("System Password:", envPassword);
+ 
 
   if (!envPassword) {
       console.log("ERROR: Password not found in .env.local");
@@ -21,12 +21,13 @@ export async function verifyLogin(code: string) {
     
     // שינוי לטובת בדיקה: secure: false
     cookieStore.set('admin_token', 'SECRET_PASS', {
-      httpOnly: true,
-      secure: false, // חשוב לבדיקה בלוקאל
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24, 
-      path: '/',
-    })
+  httpOnly: true,
+  // אם אנחנו בייצור (אתר חי) זה יהיה true, במחשב בבית false
+  secure: process.env.NODE_ENV === 'production', 
+  sameSite: 'lax',
+  maxAge: 60 * 60 * 24, 
+  path: '/',
+})
     
     console.log("Cookie set command sent. Redirecting...");
     redirect('/admin');

@@ -32,16 +32,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
      return <>{children}</>;
   }
 
-  const menuItems = [
-    { name: "לוח בקרה", href: "/admin", icon: LayoutDashboard },
-    { name: "שליחים", href: "/admin/users", icon: Users },
-    { name: "פעילויות", href: "/admin/activities", icon: FileText },
-    { name: "גלריית תמונות", href: "/admin/photos", icon: Image },
-    { name: "הודעות", href: "/admin/messages", icon: MessageSquare },
-    { name: "ניהול מנויים", href: "/admin/subscriptions", icon: CreditCard },
-    { name: "עדכון יתרה ידני", href: "/admin/manual-balance", icon: Wallet },
-    { name: "הגדרות", href: "/admin/settings", icon: Settings },
-  ];
+const menuItems = [
+  { name: "לוח בקרה", href: "/admin", icon: LayoutDashboard },
+  { name: "סטטיסטיקות", href: "/admin/overview", icon: LayoutDashboard }, // הוספנו
+  { name: "שלוחים", href: "/admin/users", icon: Users },
+  { name: "פעילויות", href: "/admin/activities", icon: FileText },
+  { name: "הנהלת חשבונות", href: "/admin/accounting", icon: FileText }, // הוספנו
+  { name: "גלריית תמונות", href: "/admin/photos", icon: Image },
+  { name: "הודעות", href: "/admin/messages", icon: MessageSquare },
+  { name: "ניהול מנויים", href: "/admin/subscriptions", icon: CreditCard },
+  { name: "זיכוי/חיוב ידני", href: "/admin/manual-balance", icon: Wallet },
+  // מחקנו את הגדרות מכאן
+];
 
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans" dir="rtl">
