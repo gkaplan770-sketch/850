@@ -1,3 +1,6 @@
+// type: uploaded file
+// fileName: gkaplan770-sketch/850/850-dcf3dee573924ab1b74e8ab1ed2ae047eb00baff/app/admin/accounting/page.tsx
+
 "use client";
 
 import React, { useState, useEffect } from 'react';
@@ -59,6 +62,7 @@ export default function AccountingPage() {
     if (!error) {
       const filtered = (data || []).filter((t: any) => {
           const d = t.details || {};
+          // מסננים פעולות מערכת שאינן קשורות להוצאות שליחים
           const adminModes = ['subscription_charge', 'manual_admin_action', 'bulk_excel_import', 'manual_debit'];
           if (adminModes.includes(d.mode)) return false;
           if (t.type === 'manual_debit') return false;
@@ -79,20 +83,23 @@ export default function AccountingPage() {
 
   // --- לוגיקה מתוקנת לזיהוי סוג ---
   const getTransactionCategory = (t: Transaction) => {
-    // בדיקה ראשונה: האם זה החזר הוצאות
-    if (t.details?.mode === 'refund') return 'refund';
-    
-    // בדיקה שניה: ספקים
-    if (t.details?.mode === 'supplier') {
-        // תיקון: בדיקה רחבה יותר האם יש פרטי בנק
-        // אם יש אובייקט bank_details והוא לא ריק - זה ספק חדש
-        if (t.details?.bank_details && Object.keys(t.details.bank_details).length > 0) {
+    const d = t.details || {};
+
+    // 1. בדיקה לפי השדה החדש המגיע מהאפליקציה (expense_type)
+    if (d.expense_type === 'reimbursement') return 'refund';
+    if (d.expense_type === 'vendor_new') return 'supplier_new';
+    if (d.expense_type === 'vendor_exist') return 'supplier_exist';
+
+    // 2. תמיכה לאחור (לפי mode או bank_details)
+    if (d.mode === 'refund') return 'refund';
+    if (d.mode === 'supplier') {
+        if (d.bank_details && Object.keys(d.bank_details).length > 0) {
             return 'supplier_new';
         }
         return 'supplier_exist'; 
     }
     
-    // ברירת מחדל: אם לא מוגדר מוד, נניח ספק קיים
+    // ברירת מחדל
     return 'supplier_exist'; 
   };
 
@@ -145,8 +152,7 @@ export default function AccountingPage() {
 
       // --- 1. אקסל (XLSX) ---
       const excelRows: any[] = [];
-      // כותרות העמודות באקסל
-      const excelHeader = ["תאריך", "שם הספק/העסק", "סוג (סיווג)", "שם השליח", "הערות", "סכום"];
+      const excelHeader = ["תאריך", "שם הספק/העסק", "סיווג (סוג)", "שם השליח", "הערות", "סכום"];
 
       Object.keys(groupedByBranch).sort().forEach(branch => {
           const branchItems = groupedByBranch[branch];
@@ -158,13 +164,13 @@ export default function AccountingPage() {
 
           branchItems.forEach(t => {
               const cat = getTransactionCategory(t);
-              const typeHeb = getTypeHebrew(cat); // כאן יכנס: 'ספק חדש' / 'ספק קיים' / 'החזר הוצאות'
+              const typeHeb = getTypeHebrew(cat);
               branchTotal += t.amount;
 
               excelRows.push([
                   new Date(t.date).toLocaleDateString('he-IL'),
                   t.title,
-                  typeHeb, // עמודה C - הסיווג המדויק
+                  typeHeb, // עמודה קריטית - כאן יופיע הסיווג הנכון
                   `${t.users?.first_name} ${t.users?.last_name}`,
                   t.details?.notes || '',
                   t.amount
@@ -176,7 +182,6 @@ export default function AccountingPage() {
       });
 
       const worksheet = XLSX.utils.aoa_to_sheet(excelRows);
-      // הרחבת עמודות לנוחות קריאה
       worksheet['!cols'] = [{ wch: 12 }, { wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 25 }, { wch: 10 }];
       
       const workbook = XLSX.utils.book_new();
@@ -186,7 +191,6 @@ export default function AccountingPage() {
 
 
       // --- 2. וורד (DOCX) ---
-      // (השארתי את הקוד הזהה לחלק הקודם כי הוא תקין, רק וידוא לוגיקה)
       const docChildren: any[] = [];
       docChildren.push(
           new Paragraph({
@@ -243,7 +247,6 @@ export default function AccountingPage() {
               );
           });
 
-          // שורת סיכום
           tableRows.push(
             new TableRow({
                 children: [
@@ -282,24 +285,25 @@ export default function AccountingPage() {
       
       for (const t of itemsToExport) {
           const category = getTransactionCategory(t);
-          // כאן התיקון הקריטי לשמות הקבצים:
-          // מחליף רווחים בקו תחתון כדי שהמחשב יקרא את זה טוב (ספק_חדש / ספק_קיים)
+          // יצירת שם קובץ תקין הכולל את הסוג הנכון
           const typeHeb = getTypeHebrew(category).replace(/\s+/g, "_"); 
           const safeSupplier = cleanText(t.title);
           const safeBranch = cleanText(t.users?.branch_name || 'כללי');
-          const cleanDate = t.date; // YYYY-MM-DD
+          const cleanDate = t.date; 
 
-          // הפורמט: שם-ספק__סוג__תאריך__סניף.jpg
+          // שם הקובץ: ספק__סוג__תאריך__סניף
           const baseFileName = `${safeSupplier}__${typeHeb}__${cleanDate}__${safeBranch}`;
 
           if (t.file_url && imgFolder) {
               try {
                   const response = await fetch(t.file_url);
                   const blob = await response.blob();
+                  // הוספת סיומת קבועה
                   imgFolder.file(`${baseFileName}_קבלה.jpg`, blob);
               } catch (e) { console.error("Error fetching img", t.id); }
           }
 
+          // אם יש אישור בנק, מורידים גם אותו
           if (category === 'supplier_new' && t.details?.bank_details?.proof_url && imgFolder) {
               try {
                   const response = await fetch(t.details.bank_details.proof_url);
