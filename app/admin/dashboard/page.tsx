@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { 
   Check, X, RefreshCw, Activity, 
   ArrowUpRight, ArrowDownLeft, ExternalLink, 
-  AlertCircle, Filter
+  AlertCircle, Filter, Calendar, Users, MapPin
 } from "lucide-react";
 
 interface Transaction {
@@ -24,8 +24,8 @@ interface Transaction {
 }
 
 export default function AdminDashboard() {
-  const [allRequests, setAllRequests] = useState<Transaction[]>([]); // כל הבקשות (ללא סינון)
-  const [filteredRequests, setFilteredRequests] = useState<Transaction[]>([]); // הבקשות המוצגות
+  const [allRequests, setAllRequests] = useState<Transaction[]>([]);
+  const [filteredRequests, setFilteredRequests] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedReq, setSelectedReq] = useState<Transaction | null>(null);
   
@@ -33,12 +33,13 @@ export default function AdminDashboard() {
   const [branches, setBranches] = useState<string[]>([]);
   const [filterBranch, setFilterBranch] = useState('all');
   const [filterType, setFilterType] = useState('all');
-  const [filterMonth, setFilterMonth] = useState(''); // YYYY-MM
+  const [filterMonth, setFilterMonth] = useState('');
 
-  // נתונים סטטיסטיים
+  // נתונים סטטיסטיים מעודכנים
   const [userStats, setUserStats] = useState({ 
     currentBalance: 0, 
-    specificActivityCount: 0 
+    monthCountBoys: 0,
+    monthCountGirls: 0
   });
   
   const [calculatingStats, setCalculatingStats] = useState(false);
@@ -47,19 +48,26 @@ export default function AdminDashboard() {
 
   const fetchRequests = async () => {
     setLoading(true);
-    // שליפת כל הבקשות הממתינות
+    
     const { data, error } = await supabase
       .from('transactions')
       .select('*, users(first_name, last_name, branch_name)')
       .eq('status', 'pending')
       .order('date', { ascending: false });
 
-    if (!error && data) {
-      setAllRequests(data);
-      setFilteredRequests(data);
+    if (error) {
+      console.error("Error fetching requests:", error);
+    } else if (data) {
+      // הגנה מפני נתונים חסרים
+      const safeData = data.map((item: any) => ({
+          ...item,
+          users: item.users || { first_name: 'לא ידוע', last_name: '', branch_name: '---' }
+      }));
+
+      setAllRequests(safeData);
+      setFilteredRequests(safeData);
       
-      // חילוץ רשימת סניפים ייחודיים לתיבת הסינון
-      const uniqueBranches = Array.from(new Set(data.map(r => r.users?.branch_name).filter(Boolean))) as string[];
+      const uniqueBranches = Array.from(new Set(safeData.map(r => r.users?.branch_name).filter(Boolean))) as string[];
       setBranches(uniqueBranches);
     }
     setLoading(false);
@@ -71,17 +79,14 @@ export default function AdminDashboard() {
   useEffect(() => {
     let result = allRequests;
 
-    // 1. סינון לפי סניף
     if (filterBranch !== 'all') {
       result = result.filter(r => r.users?.branch_name === filterBranch);
     }
 
-    // 2. סינון לפי סוג
     if (filterType !== 'all') {
       result = result.filter(r => r.type === filterType);
     }
 
-    // 3. סינון לפי חודש
     if (filterMonth) {
       result = result.filter(r => r.date.startsWith(filterMonth));
     }
@@ -90,11 +95,11 @@ export default function AdminDashboard() {
   }, [filterBranch, filterType, filterMonth, allRequests]);
 
 
-  // --- חישוב סטטיסטיקה לשליח ---
+  // --- חישוב סטטיסטיקה מופרדת (בנים/בנות) ---
   const calculateUserStats = async (req: Transaction) => {
     setCalculatingStats(true);
     
-    // 1. יתרה נוכחית (כל ההיסטוריה המאושרת)
+    // 1. יתרה נוכחית
     const { data: approvedTx } = await supabase
       .from('transactions')
       .select('amount, type')
@@ -103,20 +108,33 @@ export default function AdminDashboard() {
       
     const balance = approvedTx?.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0) || 0;
 
-    // 2. כמה פעמים עשה את הפעילות הזו החודש?
+    // 2. ספירה מופרדת לחודש הנוכחי
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
     
-    const { count: specificCount } = await supabase
+    // שולפים את כל הפעולות הדומות מהחודש האחרון (כולל פרטים)
+    const { data: monthActivity } = await supabase
       .from('transactions')
-      .select('*', { count: 'exact', head: true })
+      .select('details')
       .eq('user_id', req.user_id)
       .eq('title', req.title) 
-      .gte('date', startOfMonth); 
+      .gte('date', startOfMonth);
+
+    let boys = 0;
+    let girls = 0;
+
+    if (monthActivity) {
+        monthActivity.forEach((item: any) => {
+            if (item.details?.audience === 'boys') boys++;
+            else if (item.details?.audience === 'girls') girls++;
+            else boys++; // ברירת מחדל אם לא מוגדר
+        });
+    }
 
     setUserStats({ 
       currentBalance: balance, 
-      specificActivityCount: specificCount || 0
+      monthCountBoys: boys,
+      monthCountGirls: girls
     });
     setCalculatingStats(false);
   };
@@ -140,10 +158,9 @@ export default function AdminDashboard() {
       .eq('id', selectedReq.id);
 
     if (!error) {
-      // עדכון הרשימה המקומית (הסרת הפריט שטופל)
       const updatedList = allRequests.filter(r => r.id !== selectedReq.id);
       setAllRequests(updatedList);
-      // הסינון יתעדכן אוטומטית דרך ה-useEffect
+      setFilteredRequests(prev => prev.filter(r => r.id !== selectedReq.id));
       setSelectedReq(null);
     }
   };
@@ -162,82 +179,69 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {/* --- סרגל מסננים --- */}
-      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-4 items-center animate-in fade-in slide-in-from-top-2">
+      {/* סרגל מסננים */}
+      <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-4 items-center">
          <div className="flex items-center gap-2 text-slate-500 font-bold text-sm">
             <Filter size={16} /> סינון:
          </div>
-         
-         {/* סניף */}
-         <select 
-            value={filterBranch} 
-            onChange={(e) => setFilterBranch(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 flex-1 w-full md:w-auto"
-         >
+         <select value={filterBranch} onChange={(e) => setFilterBranch(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 flex-1 w-full md:w-auto">
             <option value="all">כל הסניפים</option>
             {branches.map(b => <option key={b} value={b}>{b}</option>)}
          </select>
-
-         {/* סוג פעולה */}
-         <select 
-            value={filterType} 
-            onChange={(e) => setFilterType(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 flex-1 w-full md:w-auto"
-         >
+         <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 flex-1 w-full md:w-auto">
             <option value="all">כל הסוגים</option>
             <option value="income">הכנסות (דיווחים)</option>
             <option value="expense">הוצאות (קבלות)</option>
          </select>
-
-         {/* חודש */}
-         <input 
-            type="month" 
-            value={filterMonth}
-            onChange={(e) => setFilterMonth(e.target.value)}
-            className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 flex-1 w-full md:w-auto cursor-pointer"
-         />
-         
-         {/* כפתור איפוס */}
+         <input type="month" value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm outline-none focus:border-blue-500 flex-1 w-full md:w-auto cursor-pointer" />
          {(filterBranch !== 'all' || filterType !== 'all' || filterMonth) && (
-            <button 
-               onClick={() => { setFilterBranch('all'); setFilterType('all'); setFilterMonth(''); }}
-               className="text-red-500 text-xs font-bold hover:underline whitespace-nowrap"
-            >
-               נקה הכל
-            </button>
+            <button onClick={() => { setFilterBranch('all'); setFilterType('all'); setFilterMonth(''); }} className="text-red-500 text-xs font-bold hover:underline whitespace-nowrap">נקה הכל</button>
          )}
       </div>
 
-      {/* רשימת הממתינים */}
-      <div className="grid grid-cols-1 gap-4">
-        {loading ? <p className="text-center text-slate-400 mt-10">טוען...</p> : filteredRequests.length === 0 ? (
-          <div className="text-center py-20 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
+      {/* --- רשימת הממתינים בתצוגת Grid (ריבועים) --- */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {loading ? <div className="col-span-full text-center text-slate-400 mt-10">טוען...</div> : filteredRequests.length === 0 ? (
+          <div className="col-span-full text-center py-20 bg-slate-50 rounded-2xl border border-dashed border-slate-300">
              <Check size={40} className="mx-auto text-slate-300 mb-2" />
-             <p className="text-slate-500 font-medium">
-                {allRequests.length > 0 ? "אין תוצאות התואמות לסינון" : "הכל טופל! אין בקשות ממתינות"}
-             </p>
+             <p className="text-slate-500 font-medium">אין בקשות ממתינות</p>
           </div>
         ) : (
           filteredRequests.map((req) => (
-            <div key={req.id} className="bg-white rounded-xl border border-slate-200 p-4 flex flex-col md:flex-row items-center justify-between gap-4 hover:shadow-md transition-shadow">
+            <div key={req.id} className="bg-white rounded-2xl border border-slate-200 p-5 flex flex-col justify-between shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group relative overflow-hidden h-full min-h-[220px]">
                
-               <div className="flex items-center gap-4 w-full md:w-auto">
-                  <div className={`w-12 h-12 rounded-full flex items-center justify-center shrink-0 ${req.type === 'income' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'}`}>
-                     {req.type === 'income' ? <ArrowDownLeft size={24} /> : <ArrowUpRight size={24} />}
-                  </div>
-                  <div>
-                     <h3 className="font-bold text-slate-800">{req.title}</h3>
-                     <p className="text-sm text-slate-500">{req.users?.first_name} {req.users?.last_name} • {req.users?.branch_name}</p>
-                     <p className="text-xs text-slate-400 mt-0.5">{new Date(req.date).toLocaleDateString('he-IL')}</p>
-                  </div>
+               {/* פס צבעוני עליון */}
+               <div className={`absolute top-0 left-0 w-full h-1.5 ${req.type === 'income' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+
+               <div>
+                   <div className="flex justify-between items-start mb-3">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${req.type === 'income' ? 'bg-green-50 text-green-600' : 'bg-red-50 text-red-600'}`}>
+                         {req.type === 'income' ? <ArrowDownLeft size={20} /> : <ArrowUpRight size={20} />}
+                      </div>
+                      <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-lg font-mono">
+                         {new Date(req.date).toLocaleDateString('he-IL')}
+                      </span>
+                   </div>
+
+                   <h3 className="font-bold text-slate-900 text-lg mb-1 line-clamp-1" title={req.title}>{req.title}</h3>
+                   <div className="text-xs text-slate-500 font-medium mb-4 flex items-center gap-1">
+                      <Users size={12} className="text-slate-400"/> {req.users?.first_name} {req.users?.last_name}
+                   </div>
+                   
+                   {/* תצוגת סניף */}
+                   <div className="text-[11px] bg-blue-50 text-blue-700 px-2 py-1 rounded inline-block font-bold mb-4">
+                      {req.users?.branch_name}
+                   </div>
                </div>
 
-               <div className="flex items-center justify-between w-full md:w-auto gap-6">
-                  <div className="text-left">
-                     <span className="block text-xs text-slate-400 font-bold">סכום</span>
-                     <span className="text-xl font-black text-slate-900">₪{req.amount.toLocaleString()}</span>
+               <div className="mt-auto flex items-end justify-between border-t border-slate-50 pt-4">
+                  <div className="text-right">
+                     <span className="block text-[10px] text-slate-400 font-bold uppercase">סכום</span>
+                     <span className={`text-xl font-black ${req.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                        ₪{req.amount.toLocaleString()}
+                     </span>
                   </div>
-                  <button onClick={() => handleInspect(req)} className="bg-slate-900 text-white px-6 py-2.5 rounded-lg font-bold text-sm shadow-lg shadow-slate-900/10 hover:bg-slate-800 transition-colors">
+                  <button onClick={() => handleInspect(req)} className="bg-slate-900 text-white px-5 py-2 rounded-lg font-bold text-xs shadow-lg hover:bg-slate-800 transition-colors">
                      פתח
                   </button>
                </div>
@@ -260,18 +264,24 @@ export default function AdminDashboard() {
                
                {/* כרטיסי מידע (סטטיסטיקה) */}
                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-                  {/* ספירת פעילות החודש */}
+                  {/* ספירת פעילות החודש - מופרדת */}
                   <div className="bg-blue-50 rounded-2xl p-5 border border-blue-100 relative overflow-hidden">
                      <Activity className="absolute top-4 left-4 text-blue-200" size={40} />
-                     <p className="text-blue-600 text-xs font-bold mb-1">פעילות זו החודש (סה"כ)</p>
-                     <div className="flex items-baseline gap-1">
-                        <span className="text-3xl font-black text-slate-800">{calculatingStats ? "..." : userStats.specificActivityCount}</span>
-                        <span className="text-sm text-slate-500">פעמים</span>
+                     <p className="text-blue-600 text-xs font-bold mb-2">פעילות זו החודש (סה"כ)</p>
+                     
+                     <div className="flex gap-4">
+                         <div>
+                             <span className="text-2xl font-black text-blue-800">{calculatingStats ? "-" : userStats.monthCountBoys}</span>
+                             <span className="text-[10px] text-blue-500 block font-bold">בנים</span>
+                         </div>
+                         <div className="w-px bg-blue-200 h-8 self-center"></div>
+                         <div>
+                             <span className="text-2xl font-black text-pink-600">{calculatingStats ? "-" : userStats.monthCountGirls}</span>
+                             <span className="text-[10px] text-pink-400 block font-bold">בנות</span>
+                         </div>
                      </div>
-                     <p className="text-xs text-slate-400 mt-2">סוג: "{selectedReq.title}"</p>
                   </div>
 
-                  {/* יתרה נוכחית */}
                   <div className="bg-slate-50 rounded-2xl p-5 border border-slate-200">
                      <p className="text-slate-500 text-xs font-bold mb-1">יתרה נוכחית</p>
                      <span className={`text-2xl font-black ${userStats.currentBalance < 0 ? 'text-red-600' : 'text-slate-800'}`}>
@@ -279,7 +289,6 @@ export default function AdminDashboard() {
                      </span>
                   </div>
 
-                  {/* יתרה צפויה */}
                   <div className={`rounded-2xl p-5 border ${
                       (userStats.currentBalance + (selectedReq.type === 'income' ? selectedReq.amount : -selectedReq.amount)) < 0 
                       ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200'
@@ -298,15 +307,33 @@ export default function AdminDashboard() {
                </div>
 
                <div className="flex flex-col lg:flex-row gap-8">
-                  {/* פרטי הבקשה */}
                   <div className="flex-1 space-y-6">
                      <div>
-                        <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">פרטים</h4>
+                        <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">פרטי הפעילות</h4>
                         <div className="text-2xl font-bold text-slate-900 mb-1">{selectedReq.title}</div>
-                        <div className="text-4xl font-black text-slate-900">₪{selectedReq.amount.toLocaleString()}</div>
+                        
+                        {/* תצוגת התאריך העברי */}
+                        <div className="flex flex-wrap gap-2 mt-2">
+                            {selectedReq.details?.hebrew_date && (
+                                <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-lg text-sm font-bold">
+                                    <Calendar size={14} /> {selectedReq.details.hebrew_date}
+                                </div>
+                            )}
+                            
+                            {/* תצוגת כמות וקהל (בנים/בנות) */}
+                            {selectedReq.details?.participants && (
+                                <div className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm font-bold ${selectedReq.details.audience === 'girls' ? 'bg-pink-50 text-pink-700' : 'bg-blue-50 text-blue-700'}`}>
+                                    <Users size={14} /> 
+                                    {selectedReq.details.participants} משתתפים 
+                                    ({selectedReq.details.audience === 'girls' ? 'בנות' : 'בנים'})
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="text-4xl font-black text-slate-900 mt-4">₪{selectedReq.amount.toLocaleString()}</div>
                      </div>
 
-                     {/* כאן התיקון: הצגת הערות השליח */}
+                     {/* הערות שליח */}
                      {selectedReq.details?.notes && (
                         <div className="bg-yellow-50 border border-yellow-100 p-4 rounded-xl shadow-sm">
                            <p className="text-xs font-bold text-yellow-800 mb-1 flex items-center gap-1">
@@ -318,43 +345,42 @@ export default function AdminDashboard() {
                         </div>
                      )}
 
-                     {/* תצוגת תשובות לשאלות מותאמות אישית - אם יש */}
+                     {/* שאלות ותשובות נוספות */}
                      {selectedReq.details?.custom_answers && Object.keys(selectedReq.details.custom_answers).length > 0 && (
-                        <div className="bg-purple-50 border border-purple-100 p-4 rounded-xl text-sm space-y-2">
-                           <p className="font-bold text-purple-900 mb-2">תשובות לשאלות נוספות:</p>
-                           {Object.entries(selectedReq.details.custom_answers).map(([key, value]) => {
-                              const questionLabel = selectedReq.details.custom_questions_snapshot?.find((q: any) => q.id === key)?.label || 'שאלה:';
+                        <div className="bg-purple-50 border border-purple-100 p-4 rounded-xl text-sm space-y-3">
+                           <p className="font-bold text-purple-900 mb-2 underline decoration-purple-200">פרטים נוספים מהדיווח:</p>
+                           {Object.entries(selectedReq.details.custom_answers).map(([key, val]: any) => {
+                              const questionSnapshot = selectedReq.details.custom_questions_snapshot || [];
+                              const qLabel = questionSnapshot.find((q:any) => q.id === key)?.label || "שאלה";
                               return (
-                                 <div key={key} className="flex justify-between border-b border-purple-100 pb-1 last:border-0">
-                                    <span className="text-purple-700">{questionLabel}</span>
-                                    <span className="font-bold text-purple-900">
-                                        {typeof value === 'boolean' ? (value ? 'כן' : 'לא') : String(value)}
-                                    </span>
+                                 <div key={key} className="flex justify-between text-sm border-b border-purple-100 last:border-0 pb-1">
+                                    <span className="text-purple-600">{qLabel}:</span>
+                                    <span className="font-bold text-purple-900">{typeof val === 'boolean' ? (val ? 'כן' : 'לא') : val}</span>
                                  </div>
-                              );
+                              )
                            })}
                         </div>
                      )}
-
-                     {/* פרטי בנק (אם זו בקשת הוצאה/החזר) */}
+                     
+                     {/* פרטי בנק */}
                      {selectedReq.details?.bank_details?.accountNumber && (
                         <div className="bg-slate-100 border border-slate-200 p-4 rounded-xl text-sm">
                            <p className="font-bold text-slate-700 mb-2">פרטי העברה בנקאית:</p>
                            <div className="grid grid-cols-2 gap-y-2 text-slate-600">
-                              <span>שם:</span> <span className="font-bold">{selectedReq.details.bank_details.ownerName}</span>
-                              <span>בנק:</span> <span className="font-bold">{selectedReq.details.bank_details.bankNumber} ({selectedReq.details.bank_details.branchNumber})</span>
-                              <span>חשבון:</span> <span className="font-bold">{selectedReq.details.bank_details.accountNumber}</span>
+                              <span>שם:</span> <span className="font-bold">{selectedReq.details.bank_details.ownerName || selectedReq.details.bank_details.owner_name}</span>
+                              <span>בנק:</span> <span className="font-bold">{selectedReq.details.bank_details.bankNumber || selectedReq.details.bank_details.bank_name}</span>
+                              <span>סניף:</span> <span className="font-bold">{selectedReq.details.bank_details.branchNumber || selectedReq.details.bank_details.branch}</span>
+                              <span>חשבון:</span> <span className="font-bold">{selectedReq.details.bank_details.accountNumber || selectedReq.details.bank_details.account}</span>
                            </div>
                         </div>
                      )}
                   </div>
 
-                  {/* תמונה */}
                   <div className="flex-1">
-                     <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">אסמכתא</h4>
+                     <h4 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">אסמכתא / תמונה</h4>
                      {selectedReq.file_url ? (
                         <a href={selectedReq.file_url} target="_blank" rel="noreferrer" className="block group relative rounded-2xl overflow-hidden border-2 border-slate-200 hover:border-blue-500 transition-all">
-                           <img src={selectedReq.file_url} alt="קבלה" className="w-full h-64 object-contain bg-slate-50" />
+                           <img src={selectedReq.file_url} alt="קבלה" className="w-full h-80 object-contain bg-slate-100" />
                            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
                               <span className="bg-white text-slate-900 px-4 py-2 rounded-full text-sm font-bold flex items-center gap-2">
                                  <ExternalLink size={16} /> פתח בגודל מלא
@@ -370,7 +396,6 @@ export default function AdminDashboard() {
                   </div>
                </div>
 
-               {/* אזור דחייה */}
                {isRejecting && (
                   <div className="mt-8 animate-in slide-in-from-top-4">
                      <label className="block text-sm font-bold text-red-600 mb-2">סיבת הדחייה (חובה):</label>
@@ -385,7 +410,6 @@ export default function AdminDashboard() {
                )}
             </div>
 
-            {/* כפתורים */}
             <div className="p-5 border-t border-slate-100 bg-slate-50 flex justify-end gap-3">
                {!isRejecting ? (
                  <>

@@ -4,8 +4,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   DollarSign, Upload, FileSpreadsheet, Search, Check, 
-  ArrowUp, ArrowDown, AlertCircle, X, ChevronDown, Loader2 
+  ArrowUp, ArrowDown, AlertCircle, X, ChevronDown, Loader2,
+  Download // <--- הוספתי את הייבוא החסר
 } from "lucide-react";
+import * as XLSX from 'xlsx';
 
 export default function ManualBalancePage() {
   const [activeTab, setActiveTab] = useState<'single' | 'bulk'>('single');
@@ -20,6 +22,7 @@ export default function ManualBalancePage() {
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -34,45 +37,34 @@ export default function ManualBalancePage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // --- התיקון הגדול כאן ---
   const fetchUsers = async () => {
     setLoadingUsers(true);
-    
-    // 1. שולפים הכל (*) כדי לא לפספס אף עמודה
     const { data, error } = await supabase
       .from('users')
       .select('*')
-      .order('created_at', { ascending: true }); // מיון ברירת מחדל
+      .order('created_at', { ascending: true });
     
     if (error) {
         console.error("שגיאה בטעינת משתמשים:", error);
-        alert("שגיאה בטעינה: " + error.message);
     } else {
-        // 2. הדפסה לקונסול כדי שנוכל לראות מה השמות האמיתיים
-        console.log("משתמשים שנטענו מהמסד:", data);
         setUsers(data || []);
     }
-    
     setLoadingUsers(false);
   };
 
-  // פונקציית עזר למציאת שם התצוגה (מנסה את כל האפשרויות)
   const getUserDisplayName = (u: any) => {
-      // מנסה למצוא שם סניף בכל מיני וריאציות
       return u.branch_name || u.snif || u.branch || u.name || u.full_name || "ללא שם";
   };
 
   const getUserIdNumber = (u: any) => {
-      return u.identity_number || u.tz || u.id_num || "";
+      return u.identity_number || u.tz || u.id_num || u.teudat_zehut || "";
   };
 
   const filteredUsers = users.filter(user => {
     const term = searchTerm.toLowerCase();
-    
-    // בדיקה על כל השדות האפשריים
     const display = getUserDisplayName(user).toLowerCase();
     const email = (user.email || '').toLowerCase();
-    const idNum = getUserIdNumber(user).toString();
+    const idNum = String(getUserIdNumber(user));
     const fullName = (user.full_name || '').toLowerCase();
 
     return display.includes(term) || email.includes(term) || idNum.includes(term) || fullName.includes(term);
@@ -98,19 +90,21 @@ export default function ManualBalancePage() {
 
     setIsSubmitting(true);
     try {
-        const finalAmount = actionType === 'credit' ? parseFloat(amount) : -parseFloat(amount);
+        const finalAmount = Math.abs(parseFloat(amount));
         
         const { error } = await supabase.from('transactions').insert([{
             user_id: selectedUser.id,
-            type: actionType === 'credit' ? 'manual_credit' : 'manual_debit',
+            // שומר כ-income/expense כדי שהשליח יראה את זה במאזן שלו כזיכוי או חיוב
+            type: actionType === 'credit' ? 'income' : 'expense',
             amount: finalAmount,
-            title: actionType === 'credit' ? 'זיכוי יזום' : 'חיוב יזום',
+            title: actionType === 'credit' ? 'זיכוי יזום: ' + reason : 'חיוב יזום: ' + reason,
             status: 'approved',
             details: {
                 notes: reason,
-                admin_action: true
+                admin_action: true,
+                original_type: actionType
             },
-            date: new Date().toISOString() // שימוש בשדה date אם קיים, אחרת created_at יתפוס אוטומטית
+            date: new Date().toISOString()
         }]);
 
         if (error) throw error;
@@ -125,6 +119,86 @@ export default function ManualBalancePage() {
     } finally {
         setIsSubmitting(false);
     }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || !e.target.files[0]) return;
+    setIsUploading(true);
+    const file = e.target.files[0];
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const arrayBuffer = evt.target?.result;
+        const wb = XLSX.read(arrayBuffer, { type: 'array' });
+        
+        const wsName = wb.SheetNames[0];
+        const ws = wb.Sheets[wsName];
+        
+        const data: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+        let success = 0;
+        let fail = 0;
+
+        for (let i = 0; i < data.length; i++) {
+           const row = data[i];
+           if (i === 0 && (String(row[0]).includes('תעודת') || String(row[0]).includes('id'))) continue;
+           
+           const tz = row[0];
+           const val = row[1];
+           const desc = row[2];
+
+           if (tz && val) {
+              const user = users.find(u => String(getUserIdNumber(u)) === String(tz));
+              
+              if (user) {
+                  const numVal = parseFloat(val);
+                  const isCredit = numVal >= 0; 
+                  
+                  await supabase.from('transactions').insert([{
+                      user_id: user.id,
+                      // גם בטעינה מאקסל - שומרים כ-income/expense
+                      type: isCredit ? 'income' : 'expense',
+                      amount: Math.abs(numVal),
+                      title: isCredit ? 'זיכוי יזום: ' + desc : 'חיוב יזום: ' + desc,
+                      status: 'approved',
+                      date: new Date().toISOString(),
+                      details: {
+                          mode: 'bulk_excel_import',
+                          notes: desc,
+                          admin_action: true
+                      }
+                  }]);
+                  success++;
+              } else {
+                  console.log(`User not found for TZ: ${tz}`);
+                  fail++;
+              }
+           }
+        }
+        alert(`התהליך הסתיים:\n✅ ${success} פעולות בוצעו בהצלחה\n❌ ${fail} נכשלו (ת.ז לא נמצאה)`);
+        
+      } catch (err:any) {
+        console.error("Excel Error:", err);
+        alert("שגיאה בקריאת הקובץ: " + err.message);
+      } finally {
+        setIsUploading(false);
+        if(e.target) e.target.value = '';
+      }
+    };
+    
+    reader.readAsArrayBuffer(file);
+  };
+
+  const downloadTemplate = () => {
+    const data = [
+      { "תעודת זהות": "123456789", "סכום (פלוס לזיכוי, מינוס לחיוב)": "500", "סיבה": "בונוס חנוכה" },
+      { "תעודת זהות": "987654321", "סכום (פלוס לזיכוי, מינוס לחיוב)": "-200", "סיבה": "קיזוז חוב ישן" },
+    ];
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template");
+    XLSX.writeFile(wb, "template_balance_update.xlsx");
   };
 
   return (
@@ -202,8 +276,6 @@ export default function ManualBalancePage() {
                             ) : filteredUsers.length === 0 ? (
                                 <div className="p-4 text-center text-slate-400 text-sm">
                                     לא נמצאו תוצאות.
-                                    <br/>
-                                    <span className="text-[10px] text-red-400">(בדוק בקונסול F12 אם הטבלה ריקה)</span>
                                 </div>
                             ) : (
                                 filteredUsers.map((user) => {
@@ -290,13 +362,21 @@ export default function ManualBalancePage() {
                      <div>C: סיבת הפעולה</div>
                   </div>
                </div>
-               <div className="border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center hover:bg-slate-50 hover:border-blue-400 transition-all cursor-pointer group">
+               
+               <div className="flex gap-4 justify-center">
+                   <button onClick={downloadTemplate} className="text-slate-500 text-sm hover:underline flex items-center gap-1">
+                       <Download size={14}/> הורד תבנית לדוגמה
+                   </button>
+               </div>
+
+               <label className="border-2 border-dashed border-slate-300 rounded-2xl p-12 text-center hover:bg-slate-50 hover:border-blue-400 transition-all cursor-pointer group block">
                    <div className="bg-slate-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 group-hover:bg-blue-100 group-hover:text-blue-600 transition-colors">
-                      <Upload size={32} className="text-slate-400 group-hover:text-blue-600" />
+                      {isUploading ? <Loader2 className="animate-spin" /> : <Upload size={32} className="text-slate-400 group-hover:text-blue-600" />}
                    </div>
                    <p className="text-lg font-bold text-slate-700">לחץ לבחירת קובץ Excel</p>
                    <p className="text-sm text-slate-400 mt-1">המערכת תעדכן את המאזן לכל השלוחים ברשימה</p>
-                </div>
+                   <input type="file" accept=".xlsx, .xls" onChange={handleFileUpload} disabled={isUploading} className="hidden" />
+                </label>
             </div>
          )}
       </div>
