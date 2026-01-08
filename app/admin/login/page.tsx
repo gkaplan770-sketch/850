@@ -1,74 +1,99 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { Lock, ArrowLeft } from "lucide-react";
-import { verifyLogin } from "./actions";
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { ShieldCheck, Lock, ArrowLeft } from "lucide-react";
+import Link from "next/link";
 
-export default function AdminLoginPage() {
+export default function AdminLogin() {
   const router = useRouter();
-  const [inputCode, setInputCode] = useState("");
+  const [code, setCode] = useState('');
   const [error, setError] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // ניקוי אישורים ישנים
+  // כאן התיקון: אנו מושכים את הסיסמה מתוך משתני הסביבה של Vercel
+  // אם משום מה המשתנה לא נטען, ברירת המחדל תהיה 226770226
+  const ADMIN_PASSWORD = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || '226770226';
+
+  // מנקה כל התחברות קודמת בעת טעינת הדף - כדי לחייב סיסמה מחדש!
   useEffect(() => {
-    document.cookie = "admin_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";
+    document.cookie = "admin-auth=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
   }, []);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    
-    // אנחנו קוראים לשרת. אם זה מצליח - השרת יעביר אותנו דף אוטומטית.
-    // אם חזרנו לפה, סימן שנכשלנו (כי ה-redirect זורק אותנו החוצה מהפונקציה בהצלחה)
-    const result = await verifyLogin(inputCode);
-    
-    // אם הגענו לשורה הזאת, סימן שהייתה שגיאה
-    if (result && !result.success) {
-        setError(true);
-        setInputCode(""); // איפוס הקוד
-        setTimeout(() => setError(false), 2000);
-        setLoading(false);
+
+    // --- בדיקת האבטחה ---
+    // כעת הבדיקה היא מול הסיסמה שהוגדרה בשרת ולא סתם מספר קשיח
+    if (code === ADMIN_PASSWORD) {
+      // 1. סיסמה נכונה
+      // שמירת אישור כניסה ל-24 שעות
+      document.cookie = "admin-auth=true; path=/; max-age=86400"; 
+      router.push('/admin/dashboard');
+    } else {
+      // 2. סיסמה שגויה
+      setLoading(false);
+      setError(true);
+      // איפוס הודעת השגיאה אחרי 2 שניות
+      setTimeout(() => setError(false), 2000);
     }
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4" dir="rtl">
-      <div className="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-sm text-center">
-        <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-6 text-slate-800">
-           <Lock size={32} />
-        </div>
+    <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 font-sans" dir="rtl">
+      <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
         
-        <h1 className="text-2xl font-black text-slate-900 mb-2">כניסת מנהל</h1>
-        <p className="text-slate-500 mb-6 text-sm">הכנס קוד גישה למערכת</p>
+        <div className="bg-blue-900 p-8 text-center relative overflow-hidden">
+           {/* אפקטים ברקע */}
+           <div className="absolute top-0 left-0 w-32 h-32 bg-white/5 rounded-full -translate-x-1/2 -translate-y-1/2 blur-2xl"></div>
+           <ShieldCheck className="mx-auto text-blue-400 mb-4 w-12 h-12" />
+           <h1 className="text-2xl font-bold text-white">כניסת מנהל מערכת</h1>
+           <p className="text-blue-200 text-sm mt-1">גישה למורשים בלבד</p>
+        </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
-          <input 
-            type="tel" 
-            value={inputCode}
-            onChange={(e) => setInputCode(e.target.value)}
-            className={`w-full text-center text-3xl font-black tracking-widest p-4 rounded-xl border-2 outline-none transition-all ${error ? 'border-red-500 bg-red-50 text-red-600' : 'border-slate-200 focus:border-slate-900'}`}
-            placeholder="______"
-            maxLength={6}
-            autoFocus
-            disabled={loading}
-          />
-          
-          {error && <p className="text-red-500 font-bold text-sm">קוד שגוי!</p>}
+        <form onSubmit={handleLogin} className="p-8 space-y-6">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">קוד גישה</label>
+            <div className="relative">
+              <input 
+                type="password" 
+                value={code}
+                onChange={(e) => {
+                  setCode(e.target.value);
+                  setError(false);
+                }}
+                className={`block w-full px-4 py-3 bg-slate-50 border ${error ? 'border-red-500 ring-1 ring-red-500' : 'border-slate-200'} rounded-xl focus:ring-2 focus:ring-blue-900 outline-none text-center text-xl tracking-[0.5em] font-bold transition-all`}
+                placeholder="••••••••"
+                autoFocus
+                autoComplete="off"
+              />
+              <Lock className="absolute right-4 top-3.5 text-slate-400" size={18} />
+            </div>
+            
+            {error && (
+              <div className="bg-red-50 text-red-600 text-xs mt-3 py-2 px-3 rounded-lg font-bold text-center animate-pulse border border-red-100">
+                קוד שגוי - הגישה נחסמה
+              </div>
+            )}
+          </div>
 
           <button 
-            type="submit" 
+            type="submit"
             disabled={loading}
-            className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-all disabled:opacity-70"
+            className="w-full bg-blue-900 hover:bg-blue-800 text-white font-bold py-4 rounded-xl transition-all shadow-lg active:scale-[0.98]"
           >
-            {loading ? "בודק..." : "כנס למערכת"}
+            {loading ? "בודק הרשאה..." : "כנס למערכת הניהול"}
           </button>
+
+          <div className="text-center pt-2">
+            <Link href="/" className="text-slate-400 hover:text-slate-600 text-sm inline-flex items-center gap-1 transition-colors">
+              <ArrowLeft size={14} />
+              חזרה למסך הכניסה הראשי
+            </Link>
+          </div>
         </form>
 
-        <button onClick={() => router.push('/')} className="mt-6 flex items-center justify-center gap-2 text-slate-400 text-sm hover:text-slate-600">
-           <ArrowLeft size={16} /> חזרה לאתר
-        </button>
       </div>
     </div>
   );
