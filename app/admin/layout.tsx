@@ -34,10 +34,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
 const menuItems = [
   { name: "לוח בקרה", href: "/admin", icon: LayoutDashboard },
-  { name: "סטטיסטיקות", href: "/admin/overview", icon: LayoutDashboard }, // הוספנו
+  { name: "סטטיסטיקות", href: "/admin/overview", icon: LayoutDashboard }, 
   { name: "שלוחים", href: "/admin/users", icon: Users },
   { name: "פעילויות", href: "/admin/activities", icon: FileText },
-  { name: "הנהלת חשבונות", href: "/admin/accounting", icon: FileText }, // הוספנו
+  { name: "הנהלת חשבונות", href: "/admin/accounting", icon: FileText }, 
   { name: "גלריית תמונות", href: "/admin/photos", icon: Image },
   { name: "הודעות", href: "/admin/messages", icon: MessageSquare },
   { name: "ניהול מנויים", href: "/admin/subscriptions", icon: CreditCard },
