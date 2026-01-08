@@ -3,31 +3,33 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Lock, ArrowLeft } from "lucide-react";
+import { verifyLogin } from "./actions";
 
 export default function AdminLoginPage() {
   const router = useRouter();
   const [inputCode, setInputCode] = useState("");
   const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  // מחיקת אישורים ישנים בכניסה לדף הזה (כדי למנוע באגים)
+  // ניקוי אישורים ישנים
   useEffect(() => {
     document.cookie = "admin_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setLoading(true);
     
-    // הקוד הסודי שלך
-    if (inputCode === "226770") {
-      // שמירת מפתח כניסה בדפדפן ל-24 שעות
-      const d = new Date();
-      d.setTime(d.getTime() + (24*60*60*1000));
-      document.cookie = "admin_token=SECRET_PASS; path=/; expires=" + d.toUTCString();
-      
-      router.push("/admin"); // מעביר פנימה
-    } else {
-      setError(true);
-      setTimeout(() => setError(false), 2000);
+    // אנחנו קוראים לשרת. אם זה מצליח - השרת יעביר אותנו דף אוטומטית.
+    // אם חזרנו לפה, סימן שנכשלנו (כי ה-redirect זורק אותנו החוצה מהפונקציה בהצלחה)
+    const result = await verifyLogin(inputCode);
+    
+    // אם הגענו לשורה הזאת, סימן שהייתה שגיאה
+    if (result && !result.success) {
+        setError(true);
+        setInputCode(""); // איפוס הקוד
+        setTimeout(() => setError(false), 2000);
+        setLoading(false);
     }
   };
 
@@ -50,15 +52,17 @@ export default function AdminLoginPage() {
             placeholder="______"
             maxLength={6}
             autoFocus
+            disabled={loading}
           />
           
           {error && <p className="text-red-500 font-bold text-sm">קוד שגוי!</p>}
 
           <button 
             type="submit" 
-            className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-all"
+            disabled={loading}
+            className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl shadow-lg active:scale-95 transition-all disabled:opacity-70"
           >
-            כנס למערכת
+            {loading ? "בודק..." : "כנס למערכת"}
           </button>
         </form>
 

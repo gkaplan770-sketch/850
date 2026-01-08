@@ -1,8 +1,12 @@
 import { createClient } from '@supabase/supabase-js';
 
-// הכתובת והמפתח ששלחת לי
-const supabaseUrl = 'https://klwncystfmipvyfazwnh.supabase.co';
-const supabaseKey = 'sb_publishable_yxABAIdqzHlQQd16GNVGGQ_dWpUTXV3';
+// שליפת המשתנים מה"כספת" (קובץ .env.local)
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
-// יצירת החיבור וייצוא שלו החוצה בשם 'supabase'
+// בדיקה שהם באמת קיימים (כדי למנוע שגיאות מוזרות אם שכחנו משהו)
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('Missing Supabase environment variables');
+}
+
 export const supabase = createClient(supabaseUrl, supabaseKey);
