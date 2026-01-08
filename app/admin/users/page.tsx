@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useRouter } from 'next/navigation';
 import * as XLSX from 'xlsx';
 import { 
-  Search, Plus, Edit2, Trash2, User, Users,
-  MapPin, X, FileSpreadsheet, Download 
+  Search, Plus, Edit2, Trash2, Users,
+  MapPin, X, FileSpreadsheet, Download, Eye 
 } from "lucide-react";
 
 interface UserData {
@@ -19,10 +20,11 @@ interface UserData {
   spouse_first_name?: string;
   spouse_phone?: string;
   role: 'admin' | 'shaliach';
-  balance?: number; // שדה חדש ליתרה
+  balance?: number;
 }
 
 export default function UsersManagement() {
+  const router = useRouter();
   const [users, setUsers] = useState<UserData[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
@@ -60,6 +62,7 @@ export default function UsersManagement() {
     }
 
     // 2. שליפת כל העסקאות המאושרות לחישוב יתרה
+    // הערה: כאן אין Join ולכן אין בעיה של כפילות Foreign Key
     const { data: txData, error: txError } = await supabase
         .from('transactions')
         .select('user_id, amount, type')
@@ -67,7 +70,7 @@ export default function UsersManagement() {
 
     if (txError) console.error("Error fetching transactions:", txError);
 
-    // 3. חישוב יתרה לכל שליח (מילון: מזהה משתמש -> סכום)
+    // 3. חישוב יתרה לכל שליח
     const balances: Record<string, number> = {};
     if (txData) {
         txData.forEach(tx => {
@@ -77,7 +80,7 @@ export default function UsersManagement() {
         });
     }
 
-    // 4. מיזוג הנתונים (הוספת היתרה לאובייקט המשתמש)
+    // 4. מיזוג הנתונים
     const mergedUsers = (usersData || []).map(u => ({
         ...u,
         balance: balances[u.id] || 0
@@ -155,6 +158,11 @@ export default function UsersManagement() {
     } catch (err) { console.error(err); }
   };
 
+  const handleViewUserDashboard = (userId: string) => {
+    // מעבר לעמוד הדינמי החדש
+    router.push(`/admin/users/${userId}`);
+  };
+
   // --- ייבוא משתמשים מאקסל ---
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || !e.target.files[0]) return;
@@ -188,7 +196,6 @@ export default function UsersManagement() {
           };
 
           if (newUser.teudat_zehut && newUser.first_name) {
-            // בדיקה אם קיים
             const { data: exist } = await supabase.from('users').select('id').eq('teudat_zehut', newUser.teudat_zehut).single();
             
             if (!exist) {
@@ -250,7 +257,6 @@ export default function UsersManagement() {
          </div>
          
          <div className="flex flex-col md:flex-row gap-3 w-full xl:w-auto">
-            {/* חיפוש */}
             <div className="relative flex-1">
                <input 
                  type="text" 
@@ -262,12 +268,10 @@ export default function UsersManagement() {
                <Search className="absolute left-3 top-3.5 text-slate-400" size={18} />
             </div>
             
-            {/* כפתורי אקסל */}
             <div className="flex gap-2">
                 <button 
                   onClick={downloadTemplate}
                   className="bg-green-50 text-green-700 px-4 py-3 rounded-xl font-bold flex items-center gap-2 hover:bg-green-100 transition-colors"
-                  title="הורד תבנית אקסל"
                 >
                   <Download size={20} /> <span className="hidden lg:inline">תבנית</span>
                 </button>
@@ -312,7 +316,6 @@ export default function UsersManagement() {
                            <MapPin size={14} /> {u.branch_name}
                         </div>
                      </td>
-                     {/* עמודת המאזן החדשה */}
                      <td className={`px-6 py-4 font-black dir-ltr text-right ${
                         (u.balance || 0) >= 0 ? 'text-green-600' : 'text-red-600'
                      }`}>
@@ -325,6 +328,14 @@ export default function UsersManagement() {
                      <td className="px-6 py-4 font-mono text-slate-500 text-sm">{u.teudat_zehut}</td>
                      <td className="px-6 py-4">
                         <div className="flex gap-2">
+                           <button 
+                             onClick={() => handleViewUserDashboard(u.id)} 
+                             className="p-2 hover:bg-purple-50 text-purple-600 rounded-lg transition-colors"
+                             title="צפייה באזור אישי"
+                           >
+                             <Eye size={18} />
+                           </button>
+                           
                            <button onClick={() => openModal(u)} className="p-2 hover:bg-blue-50 text-blue-600 rounded-lg"><Edit2 size={18} /></button>
                            <button onClick={() => handleDelete(u.id)} className="p-2 hover:bg-red-50 text-red-600 rounded-lg"><Trash2 size={18} /></button>
                         </div>
@@ -335,7 +346,7 @@ export default function UsersManagement() {
          </table>
       </div>
 
-      {/* מודל הוספה/עריכה */}
+      {/* מודל */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in">
            <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 flex flex-col max-h-[90vh]">
@@ -345,7 +356,6 @@ export default function UsersManagement() {
               </div>
               <form onSubmit={handleSave} className="p-8 overflow-y-auto">
                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* פרטי השליח */}
                     <div className="space-y-4">
                        <h3 className="font-bold text-blue-600 border-b pb-2">פרטי השליח</h3>
                        <div><label className="text-xs font-bold text-slate-500">שם פרטי *</label><input required value={formData.first_name} onChange={e => setFormData({...formData, first_name: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500" /></div>
@@ -354,7 +364,6 @@ export default function UsersManagement() {
                        <div><label className="text-xs font-bold text-slate-500">טלפון נייד</label><input value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500" /></div>
                     </div>
                     
-                    {/* פרטי האישה והסניף */}
                     <div className="space-y-4">
                        <h3 className="font-bold text-pink-600 border-b pb-2">פרטי האישה והסניף</h3>
                        <div><label className="text-xs font-bold text-slate-500">שם האישה</label><input value={formData.spouse_first_name} onChange={e => setFormData({...formData, spouse_first_name: e.target.value})} className="w-full p-3 rounded-xl border outline-none focus:border-blue-500" /></div>

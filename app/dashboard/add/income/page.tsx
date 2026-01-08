@@ -11,7 +11,7 @@ import { supabase } from '@/lib/supabase';
 
 // הגדרת המבנה של פעילות
 interface ActivityType {
-  id: string | number; // תיקון: תומך גם במספרים וגם בטקסט
+  id: string | number;
   name: string;
   category: string;
   image_required: boolean;
@@ -39,7 +39,6 @@ export default function IncomeReportPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
 
-  // --- התיקון הקריטי: המרה למחרוזת כדי שההשוואה תעבוד ---
   const currentAct = activityTypes.find(a => String(a.id) === String(selectedActId));
   const isImageRequired = currentAct?.image_required !== false; 
 
@@ -56,10 +55,41 @@ export default function IncomeReportPage() {
     setActivityTypes(data || []);
   };
 
+  // --- פונקציה חדשה: תאריך עברי עם אותיות ויום בשבוע ---
   const updateHebrewDate = (dateVal: string) => {
     try {
-      const hDate = new Date(dateVal).toLocaleDateString('he-IL', { calendar: 'hebrew', day: 'numeric', month: 'long', year: 'numeric' });
-      setHebrewDateStr(hDate);
+      const d = new Date(dateVal);
+      
+      // 1. קבלת היום בשבוע (למשל: "יום שלישי")
+      const dayOfWeek = d.toLocaleDateString('he-IL', { weekday: 'long' });
+
+      // 2. קבלת שם החודש העברי (למשל: "תשרי")
+      const monthName = d.toLocaleDateString('he-IL', { calendar: 'hebrew', month: 'long' });
+
+      // 3. קבלת המספר של היום העברי
+      // אנו משתמשים בטריק כדי לחלץ את המספר שהדפדפן נותן ללוח העברי
+      const dayNumStr = d.toLocaleDateString('he-IL-u-ca-hebrew', { day: 'numeric' });
+      const dayNum = parseInt(dayNumStr.replace(/\D/g, ''), 10); // מנקים הכל חוץ ממספרים
+
+      // 4. המרה לגימטריה (אותיות)
+      const toGematria = (num: number) => {
+          const letters = ["", "א", "ב", "ג", "ד", "ה", "ו", "ז", "ח", "ט"];
+          if (num <= 9) return letters[num];
+          if (num === 10) return "י";
+          if (num === 15) return "טו"; // ט"ו
+          if (num === 16) return "טז"; // ט"ז
+          if (num > 10 && num < 20) return "י" + letters[num % 10];
+          if (num === 20) return "כ";
+          if (num > 20 && num < 30) return "כ" + letters[num % 10];
+          if (num === 30) return "ל";
+          return num.toString(); // גיבוי
+      };
+
+      const dayLetters = toGematria(dayNum);
+
+      // הרכבת המחרוזת הסופית: יום שני כד אדר א
+      setHebrewDateStr(`${dayOfWeek} ${dayLetters} ${monthName}`);
+
     } catch (e) {
       setHebrewDateStr('');
     }
@@ -75,13 +105,11 @@ export default function IncomeReportPage() {
   useEffect(() => {
     const count = Number(participants);
     
-    // אם לא נמצאה פעילות (בגלל התיקון למעלה עכשיו היא תימצא!)
     if (!currentAct || count <= 0 || !currentAct.tiers || !Array.isArray(currentAct.tiers)) {
       setCalculatedReward(0);
       return;
     }
 
-    // חיפוש המדרגה
     const tier = currentAct.tiers.find(t => {
        const min = Number(t.min);
        const max = Number(t.max);
@@ -94,7 +122,7 @@ export default function IncomeReportPage() {
       setCalculatedReward(0);
     }
 
-  }, [participants, selectedActId, activityTypes, currentAct]); // הוספתי את currentAct לתלות
+  }, [participants, selectedActId, activityTypes, currentAct]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -146,7 +174,7 @@ export default function IncomeReportPage() {
           audience: audience, 
           notes: description,
           calculated_by_system: true,
-          hebrew_date: hebrewDateStr
+          hebrew_date: hebrewDateStr // שומרים את הפורמט היפה גם בבסיס הנתונים
         }
       }]);
 
@@ -184,7 +212,7 @@ export default function IncomeReportPage() {
                     <select 
                       value={selectedActId}
                       onChange={(e) => setSelectedActId(e.target.value)}
-                      className="w-full p-4 bg-slate-50 rounded-2xl border-none outline-none font-bold text-slate-800 appearance-none"
+                      className="w-full p-4 bg-slate-50 rounded-2xl border-none outline-none font-bold text-slate-800 appearance-none bg-white"
                     >
                        <option value="">בחר מהרשימה...</option>
                        {activityTypes.map(a => (
@@ -208,6 +236,7 @@ export default function IncomeReportPage() {
                     />
                     <Calendar className="absolute left-4 top-4 text-slate-400 pointer-events-none" size={20} />
                  </div>
+                 {/* תצוגה מעודכנת של תאריך עברי */}
                  <div className="text-center text-blue-600 text-sm font-bold mt-2">
                     {hebrewDateStr}
                  </div>
@@ -285,7 +314,6 @@ export default function IncomeReportPage() {
               </div>
            </div>
 
-           {/* כפתור שליחה - חסום אם יש 0 שקל */}
            <button 
              type="submit" 
              disabled={isSubmitting || (Number(participants) > 0 && calculatedReward === 0)} 

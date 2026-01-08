@@ -4,9 +4,9 @@ import React, { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { 
   ArrowUpRight, ArrowDownLeft, 
-  XCircle, CheckCircle, Clock,
+  XCircle, ArrowLeft,
   Home, List, User, Plus, LogOut, LayoutDashboard,
-  Mail, TrendingUp, TrendingDown, AlertTriangle 
+  Mail, TrendingUp, TrendingDown, AlertTriangle, X
 } from "lucide-react";
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -20,17 +20,38 @@ export default function Dashboard() {
   
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
   const [userName, setUserName] = useState('');
+  const [branchName, setBranchName] = useState('טוען סניף...'); 
   const [loading, setLoading] = useState(true);
-  const [messages, setMessages] = useState<any[]>([]);
+  
+  // משתנים להודעות ופופ-אפ
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [showPopup, setShowPopup] = useState(false);
+  const [newMessagesCount, setNewMessagesCount] = useState(0);
 
   useEffect(() => {
     const fetchData = async () => {
       const userId = localStorage.getItem('user_id');
       const name = localStorage.getItem('user_name');
+
       if (name) setUserName(name);
       if (!userId) return;
 
-      // 1. חישוב תאריכים לחודש הקודם
+      // --- 1. משיכת שם הסניף מטבלת users ---
+      const { data: userData } = await supabase
+        .from('users')
+        .select('branch_name')
+        .eq('id', userId)
+        .single();
+
+      if (userData && userData.branch_name) {
+        setBranchName(userData.branch_name);
+        // אופציונלי: לעדכן גם בלוקל סטורג'
+        localStorage.setItem('branch_name', userData.branch_name);
+      } else {
+        setBranchName('פורטל שליחים');
+      }
+
+      // --- 2. חישוב תאריכים לחודש הקודם ---
       const now = new Date();
       const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const prevMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
@@ -41,7 +62,7 @@ export default function Dashboard() {
       const startStr = prevDate.toISOString().split('T')[0];
       const endStr = prevMonthEnd.toISOString().split('T')[0];
 
-      // 2. שליפת כל העסקאות המאושרות לחישוב יתרה
+      // --- 3. חישוב יתרה וסטטיסטיקות ---
       const { data: allTx } = await supabase
         .from('transactions')
         .select('amount, type, status, date')
@@ -68,23 +89,42 @@ export default function Dashboard() {
         });
       }
 
-      // 3. שליפת פעולות אחרונות (כולל סיבת דחייה ופרטים)
+      // --- 4. שליפת פעולות אחרונות ---
       const { data: recent } = await supabase
         .from('transactions')
         .select('*')
         .eq('user_id', userId)
         .order('created_at', { ascending: false })
-        .limit(20);
+        .limit(10);
 
       if (recent) setRecentTransactions(recent);
       
-      // 4. שליפת הודעות
+      // --- 5. בדיקת הודעות וטיפול בפופ-אפ ---
       const { data: msgs } = await supabase
         .from('messages') 
         .select('*')
-        .order('created_at', { ascending: false })
-        .limit(3); 
-      if (msgs) setMessages(msgs);
+        .or(`user_id.eq.${userId},user_id.is.null`)
+        .eq('is_read', false); // מושכים רק מה שלא נקרא
+
+      if (msgs) {
+         setUnreadCount(msgs.length);
+
+         // לוגיקה לפופ-אפ: הצג רק אם ההודעה לא הוצגה בעבר בפופ-אפ
+         // אנו שומרים מערך של מזהי הודעות שכבר קפצו ב-localStorage
+         const seenPopups = JSON.parse(localStorage.getItem('seen_message_popups') || '[]');
+         
+         // מסננים הודעות שה-ID שלהן לא נמצא ברשימת "נצפו בפופ-אפ"
+         const newForPopup = msgs.filter(m => !seenPopups.includes(m.id));
+
+         if (newForPopup.length > 0) {
+            setNewMessagesCount(newForPopup.length);
+            setShowPopup(true);
+
+            // מעדכנים את ה-localStorage שראינו את ההודעות האלו בפופ-אפ
+            const updatedSeen = [...seenPopups, ...newForPopup.map(m => m.id)];
+            localStorage.setItem('seen_message_popups', JSON.stringify(updatedSeen));
+         }
+      }
 
       setLoading(false);
     };
@@ -97,7 +137,6 @@ export default function Dashboard() {
     router.push('/');
   };
 
-  // פונקציה שמחזירה תאריך עברי
   const getHebrewDate = (dateStr: string) => {
     try {
       return new Date(dateStr).toLocaleDateString('he-IL', { calendar: 'hebrew', day: 'numeric', month: 'long' });
@@ -106,30 +145,47 @@ export default function Dashboard() {
     }
   };
 
-  // פונקציה לבניית התיאור המפורט (סעיף 1 ברשימה שלך)
   const getTransactionDescription = (t: any) => {
-    // אם נדחה - מציגים את הסיבה
-    if (t.status === 'rejected') {
-       return `סיבת הדחייה: ${t.rejection_reason || 'לא צוינה סיבה'}`;
-    }
-    // אם זו הכנסה
-    if (t.type === 'income') {
-       return `זיכוי עבור: ${t.title}`;
-    }
-    // אם זו הוצאה
+    if (t.status === 'rejected') return `סיבת הדחייה: ${t.rejection_reason || 'לא צוינה סיבה'}`;
+    if (t.type === 'income') return `זיכוי עבור: ${t.title}`;
     return `תשלום לספק: ${t.title}`;
   };
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans flex" dir="rtl">
       
+      {/* --- פופ-אפ הודעה חדשה --- */}
+      {showPopup && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 animate-bounce-in">
+          <div className="bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-2xl border border-slate-700 flex items-center gap-4 min-w-[300px]">
+            <div className="bg-blue-600 p-2 rounded-full">
+              <Mail size={24} className="text-white" />
+            </div>
+            <div className="flex-1">
+              <h4 className="font-bold text-sm mb-1">הודעה חדשה!</h4>
+              <p className="text-xs text-slate-300">יש לך {newMessagesCount} הודעות חדשות שלא קראת.</p>
+            </div>
+            <div className="flex gap-2">
+                <Link href="/dashboard/messages">
+                    <button className="text-xs bg-white text-slate-900 px-3 py-1.5 rounded-lg font-bold hover:bg-slate-200 transition">
+                    צפה
+                    </button>
+                </Link>
+                <button onClick={() => setShowPopup(false)} className="text-slate-400 hover:text-white">
+                    <X size={20} />
+                </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* --- תפריט צד למחשב --- */}
       <aside className="hidden md:flex flex-col w-72 bg-slate-900 text-white min-h-screen sticky top-0 h-screen p-6 shadow-2xl z-20">
         <div className="mb-8 flex items-center gap-3">
            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-bold text-xl">ח</div>
            <div>
              <h2 className="font-bold text-lg">חב"ד לנוער</h2>
-             <p className="text-xs text-slate-400">פורטל שליחים</p>
+             <p className="text-xs text-slate-400 font-medium">{branchName}</p>
            </div>
         </div>
 
@@ -145,6 +201,15 @@ export default function Dashboard() {
            </Link>
            <Link href="/dashboard/add/expense" className="flex items-center gap-3 text-slate-400 hover:text-white hover:bg-white/5 p-3 rounded-xl transition-all">
               <ArrowUpRight size={20} /> <span className="font-medium">בקשת תשלום</span>
+           </Link>
+           
+           <Link href="/dashboard/messages" className="flex items-center gap-3 text-slate-400 hover:text-white hover:bg-white/5 p-3 rounded-xl transition-all justify-between">
+              <div className="flex items-center gap-3">
+                 <Mail size={20} /> <span className="font-medium">הודעות</span>
+              </div>
+              {unreadCount > 0 && (
+                <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{unreadCount}</span>
+              )}
            </Link>
         </nav>
 
@@ -185,8 +250,21 @@ export default function Dashboard() {
             <h1 className="text-xl md:text-2xl font-black text-slate-800">היי, {userName.split(' ')[0]} 👋</h1>
             <p className="text-slate-400 text-xs md:text-sm font-medium">ברוך הבא לאזור האישי</p>
           </div>
-          <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 border border-slate-200">
-             <User size={20} />
+          
+          <div className="flex items-center gap-4">
+             {/* כפתור הודעות - תוקן לניווט לעמוד messages */}
+             <Link href="/dashboard/messages" className="relative w-10 h-10 bg-slate-50 hover:bg-slate-100 rounded-full flex items-center justify-center text-slate-600 transition-colors border border-slate-200">
+                <Mail size={20} />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 border-2 border-white rounded-full flex items-center justify-center text-[9px] text-white font-bold">
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
+             </Link>
+
+             <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 border border-slate-200">
+                <User size={20} />
+             </div>
           </div>
         </header>
 
@@ -194,6 +272,14 @@ export default function Dashboard() {
 
           {/* כרטיס יתרה */}
           <div className="bg-slate-900 text-white p-8 md:p-12 rounded-[2.5rem] shadow-xl shadow-slate-900/20 relative overflow-hidden group text-center md:text-right">
+             {/* קישור "לכל התנועות" מעל היתרה */}
+             <div className="absolute top-6 left-6 z-20">
+                <Link href="/dashboard/transactions" className="flex items-center gap-1 text-slate-300 text-xs hover:text-white transition-colors bg-white/10 px-3 py-1 rounded-full backdrop-blur-sm">
+                    <span>לכל התנועות</span>
+                    <ArrowLeft size={12} />
+                </Link>
+             </div>
+
              <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
              <div className="absolute bottom-0 left-0 w-48 h-48 bg-purple-500/10 rounded-full blur-3xl translate-y-1/2 -translate-x-1/2 pointer-events-none"></div>
              
@@ -220,29 +306,12 @@ export default function Dashboard() {
              </Link>
           </div>
 
-          {/* הודעות */}
-          {messages.length > 0 && (
-            <div className="bg-blue-50 border border-blue-100 rounded-3xl p-6 shadow-sm">
-              <h3 className="text-blue-900 font-bold mb-4 flex items-center gap-2">
-                <Mail size={20} /> הודעות והעדכונים
-              </h3>
-              <div className="space-y-3">
-                {messages.map((msg) => (
-                  <div key={msg.id} className="bg-white p-4 rounded-2xl border border-blue-100 text-sm text-slate-700">
-                    <p className="font-bold mb-1">{msg.title}</p>
-                    <p>{msg.content}</p>
-                    <div className="text-xs text-slate-400 mt-2">
-                      {new Date(msg.created_at).toLocaleDateString('he-IL')}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* רשימת פעולות */}
           <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
-             <h2 className="text-xl font-bold text-slate-800 mb-6">פעולות אחרונות</h2>
+             <div className="flex justify-between items-center mb-6">
+                <h2 className="text-xl font-bold text-slate-800">פעולות אחרונות</h2>
+                <span className="text-xs text-slate-400 font-medium">מציג 10 אחרונות</span>
+             </div>
 
              {loading ? <div className="text-center py-10">טוען...</div> : recentTransactions.length === 0 ? (
                 <div className="text-center py-10 text-slate-400">אין פעולות עדיין</div>
@@ -250,42 +319,47 @@ export default function Dashboard() {
                 <div className="space-y-4">
                    {recentTransactions.map((t) => (
                       <div key={t.id} className={`p-4 rounded-2xl border flex flex-col gap-2 transition-all ${t.status === 'rejected' ? 'bg-red-50 border-red-200' : 'bg-white border-slate-100 hover:border-slate-300'}`}>
-                         
-                         <div className="flex justify-between items-start">
-                            <div className="flex gap-3 items-center">
-                               <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
-                                  t.status === 'rejected' ? 'bg-red-200 text-red-700' :
-                                  t.type === 'income' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
-                               }`}>
-                                  {t.status === 'rejected' ? <XCircle size={20}/> : (t.type === 'income' ? <ArrowDownLeft size={20}/> : <ArrowUpRight size={20}/>)}
-                               </div>
-                               <div>
-                                  <div className="font-bold text-slate-900 text-sm md:text-base">
-                                     {t.type === 'income' ? `זיכוי: ${t.title}` : `חיוב: ${t.title}`}
-                                  </div>
-                                  <div className="text-xs text-slate-500">
-                                     {/* הצגת תאריך עברי ולועזי */}
-                                     {getHebrewDate(t.date)} • {new Date(t.date).toLocaleDateString('he-IL')} 
-                                     <span className="mx-1">•</span> 
-                                     {t.status === 'pending' ? 'ממתין לאישור' : (t.status === 'approved' ? 'אושר' : 'נדחה')}
-                                  </div>
-                               </div>
-                            </div>
-                            <div className={`text-lg font-black ${t.type === 'income' ? 'text-green-600' : 'text-red-600'} ${t.status === 'rejected' ? 'line-through opacity-50' : ''}`}>
-                               {t.type === 'income' ? '+' : '-'}₪{t.amount.toLocaleString()}
-                            </div>
-                         </div>
+                          
+                          <div className="flex justify-between items-start">
+                             <div className="flex gap-3 items-center">
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                                   t.status === 'rejected' ? 'bg-red-200 text-red-700' :
+                                   t.type === 'income' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                                }`}>
+                                   {t.status === 'rejected' ? <XCircle size={20}/> : (t.type === 'income' ? <ArrowDownLeft size={20}/> : <ArrowUpRight size={20}/>)}
+                                </div>
+                                <div>
+                                   <div className="font-bold text-slate-900 text-sm md:text-base">
+                                      {t.type === 'income' ? `זיכוי: ${t.title}` : `חיוב: ${t.title}`}
+                                   </div>
+                                   <div className="text-xs text-slate-500">
+                                      {getHebrewDate(t.date)} • {new Date(t.date).toLocaleDateString('he-IL')} 
+                                      <span className="mx-1">•</span> 
+                                      {t.status === 'pending' ? 'ממתין לאישור' : (t.status === 'approved' ? 'אושר' : 'נדחה')}
+                                   </div>
+                                </div>
+                             </div>
+                             <div className={`text-lg font-black ${t.type === 'income' ? 'text-green-600' : 'text-red-600'} ${t.status === 'rejected' ? 'line-through opacity-50' : ''}`}>
+                                {t.type === 'income' ? '+' : '-'}₪{t.amount.toLocaleString()}
+                             </div>
+                          </div>
 
-                         {/* תיאור מפורט / סיבת דחייה */}
-                         <div className={`p-3 rounded-xl text-sm mt-1 flex items-start gap-2 ${
-                           t.status === 'rejected' ? 'bg-red-100 text-red-900 font-medium' : 'bg-slate-50 text-slate-600'
-                         }`}>
-                            {t.status === 'rejected' && <AlertTriangle size={16} className="shrink-0 mt-0.5" />}
-                            {getTransactionDescription(t)}
-                         </div>
+                          <div className={`p-3 rounded-xl text-sm mt-1 flex items-start gap-2 ${
+                            t.status === 'rejected' ? 'bg-red-100 text-red-900 font-medium' : 'bg-slate-50 text-slate-600'
+                          }`}>
+                             {t.status === 'rejected' && <AlertTriangle size={16} className="shrink-0 mt-0.5" />}
+                             {getTransactionDescription(t)}
+                          </div>
 
                       </div>
                    ))}
+
+                   {/* כפתור לכל התנועות - תחתון */}
+                   <Link href="/dashboard/transactions" className="block mt-4">
+                      <button className="w-full py-4 rounded-2xl border-2 border-slate-100 text-slate-600 font-bold hover:bg-slate-50 hover:border-slate-200 transition-all flex items-center justify-center gap-2">
+                          לכל התנועות <ArrowLeft size={18} />
+                      </button>
+                   </Link>
                 </div>
              )}
           </div>

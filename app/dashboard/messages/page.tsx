@@ -17,7 +17,7 @@ export default function MessagesPage() {
     const { data, error } = await supabase
       .from('messages')
       .select('*')
-      .or(`receiver_id.eq.${userId},receiver_id.is.null`)
+    .or(`user_id.eq.${userId},user_id.is.null`)
       .order('created_at', { ascending: false });
 
     if (!error) setMessages(data || []);

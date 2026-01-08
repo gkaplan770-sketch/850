@@ -1,167 +1,265 @@
 "use client";
 
-import React, { useState } from 'react';
-import { Send, Users, User, CheckCircle2, Clock } from "lucide-react";
+import React, { useState, useEffect } from 'react';
+import { supabase } from '@/lib/supabase';
+import { Send, Trash2, Bell, Check, Users, User, RefreshCw, Sparkles, X } from "lucide-react";
+
+// --- רשימת התבניות הקבועות (ניתן להוסיף/לשנות כאן בקלות) ---
+const MESSAGE_TEMPLATES = [
+  { 
+    label: "תזכורת דיווח", 
+    title: "תזכורת: דיווח פעילות חודשי", 
+    content: "שלום לכולם, נא לא לשכוח להזין את דיווחי הפעילות וההכנסות עד סוף השבוע. תודה!" 
+  },
+  { 
+    label: "חג שמח", 
+    title: "חג שמח!", 
+    content: "לכל הרכזים והפעילים, חג שמח ומבורך! מאחלים הרבה הצלחה בפעילות." 
+  },
+  { 
+    label: "עדכון נהלים", 
+    title: "עדכון נהלים חשוב", 
+    content: "שימו לב, עודכנו הנהלים לגבי החזר הוצאות. אנא התעדכנו בקובץ המצורף בדרייב." 
+  },
+  { 
+    label: "יישר כוח", 
+    title: "יישר כוח ענק!", 
+    content: "כל הכבוד על הפעילות המדהימה השבוע. רואים את התוצאות בשטח. תמשיכו כך!" 
+  }
+];
 
 export default function AdminMessagesPage() {
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [users, setUsers] = useState<any[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
   
-  // נתוני הטופס
-  const [formData, setFormData] = useState({
-    target: 'all', // 'all', 'branch', 'specific_user'
-    targetId: '', // אם נבחר סניף או משתמש ספציפי
-    title: '',
-    content: ''
-  });
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [sendMode, setSendMode] = useState<'all' | 'select'>('all');
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [isSending, setIsSending] = useState(false);
 
-  // היסטוריית הודעות (דמה)
-  const messageHistory = [
-    { id: 1, title: "הגשת קבלות דצמבר", target: "כל השלוחים", date: "04/01/2026", status: "sent" },
-    { id: 2, title: "עדכון תעריפי נסיעות", target: "סניף צפון", date: "03/01/2026", status: "sent" },
-    { id: 3, title: "חסרה קבלה - באולינג", target: "ישראל ישראלי", date: "01/01/2026", status: "read" },
-  ];
+  useEffect(() => {
+    fetchData();
+  }, []);
 
-  const handleSend = (e: React.FormEvent) => {
+  const fetchData = async () => {
+    // 1. שליפת משתמשים
+    const { data: usersData } = await supabase.from('users').select('*');
+    setUsers(usersData || []);
+
+    // 2. שליפת הודעות (בלי JOIN כדי למנוע תקלות)
+    const { data: msgsData } = await supabase
+      .from('messages')
+      .select('*')
+      .order('created_at', { ascending: false }); // הודעות חדשות למעלה
+    setMessages(msgsData || []);
+  };
+
+  const toggleUserSelection = (userId: string) => {
+    if (selectedIds.includes(userId)) {
+      setSelectedIds(selectedIds.filter(id => id !== userId));
+    } else {
+      setSelectedIds([...selectedIds, userId]);
+    }
+  };
+
+  const getUserDisplayName = (userId: string | null) => {
+    if (!userId) return "הודעה כללית";
+    const user = users.find(u => u.id === userId);
+    if (!user) return "סניף לא ידוע";
+    return user.branch_name || user.full_name || "ללא שם";
+  };
+
+  const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsSubmitting(true);
-    
-    // כאן תהיה השליחה לשרת
-    setTimeout(() => {
-      alert("ההודעה נשלחה בהצלחה!");
-      setIsSubmitting(false);
-      setFormData({ target: 'all', targetId: '', title: '', content: '' });
-    }, 1500);
+    if (!title || !content) { alert("חובה למלא נושא ותוכן"); return; }
+    if (sendMode === 'select' && selectedIds.length === 0) { alert("חובה לסמן לפחות סניף אחד"); return; }
+
+    setIsSending(true);
+    try {
+        let payloads = [];
+        if (sendMode === 'all') {
+            payloads.push({ title, content, user_id: null, is_read: false });
+        } else {
+            payloads = selectedIds.map(uid => ({ title, content, user_id: uid, is_read: false }));
+        }
+
+        const { error } = await supabase.from('messages').insert(payloads);
+        if (error) throw error;
+
+        // איפוס הטופס
+        setTitle(''); 
+        setContent(''); 
+        setSendMode('all'); 
+        setSelectedIds([]);
+        fetchData(); // רענון מידי
+
+    } catch (error: any) {
+        alert("שגיאה: " + error.message);
+    } finally {
+        setIsSending(false);
+    }
+  };
+
+  const deleteMessage = async (id: string) => {
+    if (!confirm("למחוק?")) return;
+    await supabase.from('messages').delete().eq('id', id);
+    setMessages(prev => prev.filter(m => m.id !== id));
+  };
+
+  // מילוי אוטומטי מתבנית
+  const fillTemplate = (tmpl: any) => {
+    setTitle(tmpl.title);
+    setContent(tmpl.content);
   };
 
   return (
-    <div className="space-y-8 pb-20">
+    <div className="p-6 max-w-7xl mx-auto space-y-8 text-slate-800" dir="rtl">
       
-      <div className="flex justify-between items-end">
+      {/* כותרת */}
+      <div className="flex justify-between items-center">
         <div>
-          <h2 className="text-3xl font-bold text-slate-900">מרכז הודעות</h2>
-          <p className="text-slate-500 mt-1">שליחת עדכונים והודעות לשלוחים</p>
+          <h1 className="text-3xl font-black text-slate-900">מרכז הודעות</h1>
+          <p className="text-slate-500 text-sm">שליחת עדכונים לסניפים</p>
         </div>
+        <button onClick={fetchData} className="bg-slate-100 p-2 rounded-full hover:bg-slate-200 transition-colors">
+            <RefreshCw size={20} className="text-slate-600" />
+        </button>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
-        {/* --- טופס כתיבת הודעה (צד ימין - רחב) --- */}
-        <div className="lg:col-span-2 space-y-6">
-           <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-8">
-              <div className="flex items-center gap-3 mb-6 border-b border-slate-100 pb-4">
-                 <div className="bg-blue-100 p-3 rounded-full text-blue-600">
-                    <Send size={24} />
-                 </div>
-                 <h3 className="text-xl font-bold text-slate-800">כתיבת הודעה חדשה</h3>
+        {/* --- צד ימין: טופס כתיבה (תופס 4/12 מהרוחב) --- */}
+        <div className="lg:col-span-4 space-y-6">
+          
+          <div className="bg-white p-6 rounded-3xl shadow-lg shadow-slate-200/50 border border-slate-100">
+            <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-700">
+              <Send size={18} className="text-blue-600" /> כתיבת הודעה
+            </h2>
+
+            {/* תבניות מהירות */}
+            <div className="mb-6">
+                <label className="text-xs font-bold text-slate-400 mb-2 flex items-center gap-1">
+                    <Sparkles size={12} /> תבניות מהירות (לחץ למילוי):
+                </label>
+                <div className="flex flex-wrap gap-2">
+                    {MESSAGE_TEMPLATES.map((tmpl, idx) => (
+                        <button 
+                            key={idx}
+                            type="button"
+                            onClick={() => fillTemplate(tmpl)}
+                            className="text-[11px] font-bold bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-full hover:bg-blue-50 hover:border-blue-200 hover:text-blue-600 transition-all active:scale-95"
+                        >
+                            {tmpl.label}
+                        </button>
+                    ))}
+                    {(title || content) && (
+                        <button onClick={() => {setTitle(''); setContent('');}} className="text-[11px] bg-red-50 text-red-500 px-2 py-1.5 rounded-full hover:bg-red-100 border border-transparent" title="נקה טופס">
+                            <X size={12} />
+                        </button>
+                    )}
+                </div>
+            </div>
+            
+            <form onSubmit={handleSend} className="space-y-4">
+              
+              {/* בחירת נמענים */}
+              <div className="flex bg-slate-100 p-1 rounded-xl">
+                  <button type="button" onClick={() => setSendMode('all')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${sendMode === 'all' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'}`}> <Users size={14} className="inline ml-1"/> לכולם </button>
+                  <button type="button" onClick={() => setSendMode('select')} className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all ${sendMode === 'select' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500'}`}> <User size={14} className="inline ml-1"/> בחירה </button>
               </div>
 
-              <form onSubmit={handleSend} className="space-y-6">
-                 
-                 {/* למי שולחים? */}
-                 <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-3">למי לשלוח?</label>
-                    <div className="grid grid-cols-3 gap-3">
-                       <button
-                         type="button"
-                         onClick={() => setFormData({...formData, target: 'all'})}
-                         className={`py-3 rounded-xl border font-bold flex flex-col items-center gap-2 transition-all ${formData.target === 'all' ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
-                       >
-                          <Users size={20} />
-                          לכולם
-                       </button>
-                       <button
-                         type="button"
-                         onClick={() => setFormData({...formData, target: 'specific_user'})}
-                         className={`py-3 rounded-xl border font-bold flex flex-col items-center gap-2 transition-all ${formData.target === 'specific_user' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-50'}`}
-                       >
-                          <User size={20} />
-                          לשליח ספציפי
-                       </button>
-                    </div>
-                 </div>
+              {/* רשימת בחירה (אם נבחר "בחירה אישית") */}
+              {sendMode === 'select' && (
+                  <div className="border border-slate-200 rounded-xl p-2 h-40 overflow-y-auto bg-slate-50 space-y-1 custom-scrollbar">
+                      {users.length === 0 && <p className="text-center text-xs text-slate-400 py-4">אין משתמשים</p>}
+                      {users.map(u => {
+                          const isSelected = selectedIds.includes(u.id);
+                          const displayName = u.branch_name || u.full_name || u.email?.split('@')[0];
+                          return (
+                              <div key={u.id} onClick={() => toggleUserSelection(u.id)} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer border transition-all ${isSelected ? 'bg-blue-50 border-blue-200' : 'bg-white border-transparent hover:bg-slate-100'}`}>
+                                  <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-blue-600 border-blue-600' : 'border-slate-300 bg-white'}`}>
+                                      {isSelected && <Check size={10} className="text-white" />}
+                                  </div>
+                                  <span className={`text-xs font-bold truncate ${isSelected ? 'text-blue-900' : 'text-slate-600'}`}>{displayName}</span>
+                              </div>
+                          )
+                      })}
+                  </div>
+              )}
 
-                 {/* אם נבחר שליח ספציפי - הצג שדה חיפוש */}
-                 {formData.target === 'specific_user' && (
-                    <div className="animate-in fade-in slide-in-from-top-2">
-                       <label className="block text-sm font-bold text-slate-700 mb-2">בחר שליח</label>
-                       <select 
-                         className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-medium"
-                         value={formData.targetId}
-                         onChange={(e) => setFormData({...formData, targetId: e.target.value})}
-                       >
-                          <option value="">בחר מהרשימה...</option>
-                          <option value="1">ישראל ישראלי - סניף מרכז</option>
-                          <option value="2">מנחם כהן - סניף צפון</option>
-                       </select>
-                    </div>
-                 )}
-
-                 {/* כותרת ותוכן */}
-                 <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-2">נושא ההודעה</label>
-                    <input 
-                      type="text" 
-                      required
-                      placeholder="לדוגמה: תזכורת להגשת דוחות"
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 font-bold"
-                      value={formData.title}
-                      onChange={(e) => setFormData({...formData, title: e.target.value})}
-                    />
-                 </div>
-
-                 <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-2">תוכן ההודעה</label>
-                    <textarea 
-                      rows={5}
-                      required
-                      placeholder="כתוב כאן את תוכן ההודעה..."
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:border-blue-500 resize-none"
-                      value={formData.content}
-                      onChange={(e) => setFormData({...formData, content: e.target.value})}
-                    />
-                 </div>
-
-                 <button 
-                   type="submit"
-                   disabled={isSubmitting}
-                   className="w-full bg-slate-900 hover:bg-slate-800 text-white py-4 rounded-xl font-bold shadow-lg flex items-center justify-center gap-2 transition-all active:scale-95"
-                 >
-                    {isSubmitting ? "שולח..." : "שלח הודעה"}
-                    <Send size={18} />
-                 </button>
-
-              </form>
-           </div>
+              {/* שדות קלט */}
+              <div>
+                  <input type="text" required value={title} onChange={(e) => setTitle(e.target.value)} placeholder="נושא ההודעה" className="w-full p-3 rounded-xl border border-slate-200 font-bold text-sm focus:border-blue-500 outline-none transition-colors" />
+              </div>
+              <div>
+                  <textarea rows={5} required value={content} onChange={(e) => setContent(e.target.value)} placeholder="תוכן ההודעה..." className="w-full p-3 rounded-xl border border-slate-200 text-sm resize-none focus:border-blue-500 outline-none transition-colors leading-relaxed" />
+              </div>
+              
+              <button type="submit" disabled={isSending} className="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl shadow-lg hover:bg-slate-800 transition-all active:scale-95 flex items-center justify-center gap-2">
+                {isSending ? <span className="animate-pulse">שולח...</span> : <><Send size={18} /> שלח הודעה</>}
+              </button>
+            </form>
+          </div>
         </div>
 
-        {/* --- היסטוריית הודעות (צד שמאל - צר) --- */}
-        <div className="space-y-6">
-           <div className="bg-slate-50 rounded-3xl p-6 border border-slate-200 h-full">
-              <h3 className="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                 <Clock size={20} className="text-slate-400" />
-                 הודעות שנשלחו לאחרונה
-              </h3>
-              
-              <div className="space-y-4">
-                 {messageHistory.map((msg) => (
-                    <div key={msg.id} className="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                       <div className="flex justify-between items-start mb-1">
-                          <span className="text-xs font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-600">{msg.target}</span>
-                          <span className="text-xs text-slate-400">{msg.date}</span>
-                       </div>
-                       <h4 className="font-bold text-slate-800 text-sm mb-1">{msg.title}</h4>
-                       <div className="flex items-center gap-1 text-xs text-green-600 font-bold">
-                          <CheckCircle2 size={12} />
-                          {msg.status === 'read' ? 'נקרא על ידי כולם' : 'נשלח בהצלחה'}
-                       </div>
-                    </div>
-                 ))}
+        {/* --- צד שמאל: היסטוריה (תופס 8/12 מהרוחב) --- */}
+        <div className="lg:col-span-8">
+            <h2 className="text-lg font-bold mb-4 flex items-center gap-2 text-slate-700">
+              <Bell size={18} className="text-orange-500" /> היסטוריית הודעות שנשלחו
+            </h2>
+            
+            {messages.length === 0 ? (
+              <div className="text-center py-12 bg-white rounded-3xl border border-dashed border-slate-200">
+                <p className="text-slate-400 font-bold">טרם נשלחו הודעות</p>
               </div>
-              
-              <button className="w-full mt-4 text-sm font-bold text-slate-500 hover:text-blue-600 py-2">
-                 צפה בכל ההיסטוריה
-              </button>
-           </div>
+            ) : (
+              // גריד של כרטיסיות קטנות
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto pr-2 pb-2">
+                {messages.map(msg => {
+                  const senderName = getUserDisplayName(msg.user_id);
+                  const isGeneral = !msg.user_id;
+                  const dateStr = new Date(msg.created_at).toLocaleDateString('he-IL');
+                  const timeStr = new Date(msg.created_at).toLocaleTimeString('he-IL', {hour: '2-digit', minute:'2-digit'});
+
+                  return (
+                    <div key={msg.id} className="group bg-white p-4 rounded-2xl shadow-sm border border-slate-100 hover:shadow-md transition-all flex flex-col justify-between h-48 relative overflow-hidden">
+                      
+                      {/* פס צבעוני בצד */}
+                      <div className={`absolute top-0 right-0 w-1.5 h-full ${isGeneral ? 'bg-orange-400' : 'bg-blue-500'}`} />
+
+                      <div>
+                        {/* כותרת עליונה */}
+                        <div className="flex justify-between items-start mb-2 pr-2">
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold truncate max-w-[120px] ${isGeneral ? 'bg-orange-50 text-orange-600' : 'bg-blue-50 text-blue-600'}`}>
+                                {senderName}
+                            </span>
+                            <span className="text-[10px] text-slate-400 flex-shrink-0">{dateStr}</span>
+                        </div>
+                        
+                        {/* תוכן */}
+                        <h3 className="font-bold text-slate-800 text-sm mb-1 truncate pr-2" title={msg.title}>{msg.title}</h3>
+                        <p className="text-xs text-slate-500 leading-relaxed line-clamp-4 pr-2 pl-1">
+                            {msg.content}
+                        </p>
+                      </div>
+                      
+                      {/* כפתור מחיקה ושעה */}
+                      <div className="flex justify-between items-end mt-2 pr-2 border-t border-slate-50 pt-2">
+                        <span className="text-[10px] text-slate-300">{timeStr}</span>
+                        <button 
+                            onClick={() => deleteMessage(msg.id)} 
+                            className="text-slate-300 hover:text-red-500 hover:bg-red-50 p-1.5 rounded-lg transition-colors"
+                            title="מחק הודעה"
+                        >
+                            <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
         </div>
 
       </div>

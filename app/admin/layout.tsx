@@ -1,131 +1,118 @@
 "use client";
 
-import React from 'react';
-import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation'; // הוספנו את useRouter
+import React, { useEffect, useState } from "react";
+import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { 
-  LayoutDashboard, 
-  Users, 
-  FileText, 
-  CreditCard, 
-  LogOut,
-  ShieldCheck,
-  Tags,
-  Scale,
-  Activity 
+  LayoutDashboard, Users, FileText, Settings, 
+  LogOut, Menu, X, MessageSquare, Image,
+  CreditCard, // הוספתי עבור מנויים
+  Wallet      // הוספתי עבור יתרה ידנית
 } from "lucide-react";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const pathname = usePathname();
-  const router = useRouter(); // שימוש בראוטר להפניה
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  
+  // ברירת מחדל: חסום
+  const [isAuthorized, setIsAuthorized] = useState(false);
 
-  // אם אנחנו בדף ה-login, נחזיר רק את התוכן נקי, בלי המסגרת של האדמין
-  if (pathname === '/admin/login') {
-    return <>{children}</>;
+  useEffect(() => {
+    // אם זה דף הלוגין - מותר
+    if (pathname === "/admin/login") {
+      setIsAuthorized(true);
+      return;
+    }
+
+    // בדיקת קוד סודי בקוקיז
+    const hasToken = document.cookie.split(';').some((item) => item.trim().startsWith('admin_token=SECRET_PASS'));
+    
+    if (!hasToken) {
+      setIsAuthorized(false);
+      router.push("/admin/login");
+    } else {
+      setIsAuthorized(true);
+    }
+  }, [pathname, router]);
+
+  const handleLogout = () => {
+    // 1. מחיקת המפתח מהדפדפן
+    document.cookie = "admin_token=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";
+    
+    // 2. הפניה חזרה לדף כניסת מנהל (במקום לדף הבית)
+    router.push("/admin/login");
+  };
+
+  // --- חסימות והצגה ---
+
+  if (pathname === "/admin/login") {
+     return <>{children}</>;
+  }
+
+  if (!isAuthorized) {
+     return null; 
   }
 
   const menuItems = [
-    { 
-      name: 'לוח בקרה', 
-      href: '/admin/dashboard', 
-      icon: <LayoutDashboard size={20} /> 
-    },
-    { 
-      name: 'סטטיסטיקה', 
-      href: '/admin/overview', 
-      icon: <Activity size={20} /> 
-    },
-    { 
-      name: 'ניהול שלוחים', 
-      href: '/admin/users', 
-      icon: <Users size={20} /> 
-    },
-    { 
-      name: 'מנויים וחיובים', 
-      href: '/admin/subscriptions', 
-      icon: <CreditCard size={20} /> 
-    },
-    { 
-      name: 'סוגי פעילות', 
-      href: '/admin/activities', 
-      icon: <Tags size={20} /> 
-    },
-    { 
-      name: 'זיכוי/חיוב יזום', 
-      href: '/admin/credit-debit', 
-      icon: <Scale size={20} /> 
-    },
-    { 
-      name: 'הנהלת חשבונות', 
-      href: '/admin/accounting', 
-      icon: <FileText size={20} /> 
-    },
-  ];
+    { name: "לוח בקרה", href: "/admin", icon: LayoutDashboard },
+    { name: "שליחים", href: "/admin/users", icon: Users },
+    { name: "פעילויות", href: "/admin/activities", icon: FileText },
+    { name: "גלריית תמונות", href: "/admin/photos", icon: Image },
+    { name: "הודעות", href: "/admin/messages", icon: MessageSquare },
+    
+    // --- התוספות החדשות ---
+    { name: "ניהול מנויים", href: "/admin/subscriptions", icon: CreditCard },
+    { name: "עדכון יתרה ידני", href: "/admin/manual-balance", icon: Wallet },
+    // ----------------------
 
-  // --- פונקציית יציאה מסודרת ---
-  const handleLogout = () => {
-    // מחיקת הקוקי של האדמין
-    document.cookie = "admin-auth=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT;";
-    // הפניה לדף הכניסה של האדמין
-    router.push('/admin/login');
-  };
+    { name: "הגדרות", href: "/admin/settings", icon: Settings },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50 flex font-sans" dir="rtl">
       
-      {/* תפריט צד (Sidebar) */}
-      <aside className="w-64 bg-slate-900 text-white min-h-screen sticky top-0 h-screen flex flex-col shadow-2xl z-20">
-        
-        {/* כותרת התפריט */}
-        <div className="p-6 border-b border-slate-800 flex items-center gap-3">
-           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg shadow-blue-600/20">
-             <ShieldCheck size={24} />
-           </div>
-           <div>
-             <h1 className="font-bold text-lg leading-tight">פנל ניהול</h1>
-             <p className="text-xs text-slate-400">חב"ד לנוער</p>
-           </div>
+      <button onClick={() => setIsSidebarOpen(true)} className="lg:hidden fixed top-4 right-4 z-50 p-2 bg-white rounded-full shadow-md text-slate-600">
+        <Menu size={24} />
+      </button>
+
+      <aside className={`
+        fixed inset-y-0 right-0 z-40 w-64 bg-slate-900 text-white transform transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static shadow-2xl
+        ${isSidebarOpen ? "translate-x-0" : "translate-x-full"}
+      `}>
+        <div className="p-6 flex justify-between items-center border-b border-slate-800">
+          <div>
+            <h1 className="text-2xl font-black tracking-tight">ניהול</h1>
+            <p className="text-xs text-slate-400 mt-1">מחובר ומאובטח</p>
+          </div>
+          <button onClick={() => setIsSidebarOpen(false)} className="lg:hidden text-slate-400 hover:text-white"><X size={24} /></button>
         </div>
 
-        {/* רשימת הכפתורים */}
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto custom-scrollbar">
-           {menuItems.map((item) => {
-             const isActive = pathname === item.href;
-             return (
-               <Link 
-                 key={item.href} 
-                 href={item.href}
-                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 ${
-                   isActive 
-                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-900/50 font-bold' 
-                     : 'text-slate-400 hover:bg-white/10 hover:text-white'
-                 }`}
-               >
-                 {item.icon}
-                 <span>{item.name}</span>
-               </Link>
-             );
-           })}
+        <nav className="p-4 space-y-2">
+          {menuItems.map((item) => {
+            const isActive = pathname === item.href;
+            return (
+              <Link key={item.href} href={item.href} onClick={() => setIsSidebarOpen(false)} className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 font-medium ${isActive ? "bg-blue-600 text-white shadow-lg shadow-blue-900/50" : "text-slate-400 hover:bg-slate-800 hover:text-white"}`}>
+                <item.icon size={20} />
+                {item.name}
+              </Link>
+            );
+          })}
         </nav>
 
-        {/* כפתור יציאה - שונה מכפתור לקישור עם פעולה */}
-        <div className="p-4 border-t border-slate-800">
-           <button 
-             onClick={handleLogout} 
-             className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-red-400 hover:bg-red-900/20 transition-all font-bold"
-           >
-              <LogOut size={20} />
-              <span>יציאה למסך כניסה</span>
-           </button>
+        <div className="absolute bottom-0 w-full p-4 border-t border-slate-800">
+          <button onClick={handleLogout} className="flex items-center gap-3 px-4 py-3 w-full rounded-xl text-red-400 hover:bg-red-500/10 transition-colors font-medium">
+            <LogOut size={20} />
+            יציאה
+          </button>
         </div>
-
       </aside>
 
-      {/* תוכן העמוד המשתנה */}
-      <main className="flex-1 p-8 overflow-y-auto">
-         {children}
+      <main className="flex-1 overflow-auto h-screen">
+        {children}
       </main>
 
+      {isSidebarOpen && <div onClick={() => setIsSidebarOpen(false)} className="fixed inset-0 bg-black/50 z-30 lg:hidden backdrop-blur-sm" />}
     </div>
   );
 }

@@ -1,189 +1,207 @@
 "use client";
 
-import React, { useState } from 'react';
-import { ArrowRight, Receipt, UploadCloud, Calendar, Clock, CheckCircle, AlertCircle, X } from "lucide-react";
-import Link from "next/link";
+import React, { useEffect, useState } from 'react';
+import { supabase } from '@/lib/supabase';
+import { 
+  ArrowUpRight, ArrowDownLeft, 
+  Clock, AlertTriangle, XCircle, CheckCircle,
+  Home, List, User, Plus, LogOut, LayoutDashboard,
+  Mail 
+} from "lucide-react";
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-export default function ReceiptsPage() {
+export default function Dashboard() {
   const router = useRouter();
-  
-  // נתוני דמה: רק עסקאות שסטטוסן "ממתין לקבלה" מופיעות כאן
-  const [pendingItems, setPendingItems] = useState([
-    { id: 1, title: "תשלום לחברת האוטובוסים", supplier: "אגד היסעים", amount: 1500, date: "24/12/2025" },
-    { id: 2, title: "קניית פרסים למבצע", supplier: "הכל בשקל", amount: 320, date: "20/12/2025" },
-    { id: 3, title: "כיבוד להתוועדות", supplier: "מאפיית הכפר", amount: 85, date: "18/12/2025" },
-  ]);
+  const [stats, setStats] = useState({ balance: 0, income: 0, expense: 0 });
+  const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
+  const [userName, setUserName] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState<any[]>([]);
 
-  const [selectedItem, setSelectedItem] = useState<any>(null);
-  const [isUploading, setIsUploading] = useState(false);
-  const [showSuccess, setShowSuccess] = useState(false);
+  useEffect(() => {
+    const fetchData = async () => {
+      const userId = localStorage.getItem('user_id');
+      const name = localStorage.getItem('user_name');
+      if (name) setUserName(name);
+      if (!userId) return;
 
-  // פתיחת המודל להעלאה
-  const handleOpenUpload = (item: any) => {
-    setSelectedItem(item);
-    setShowSuccess(false);
-  };
+      // חישוב יתרות
+      const { data: allTx } = await supabase
+        .from('transactions')
+        .select('amount, type, status')
+        .eq('user_id', userId)
+        .eq('status', 'approved');
 
-  // סגירת המודל
-  const handleClose = () => {
-    setSelectedItem(null);
-    setIsUploading(false);
-  };
+      const income = allTx?.filter(t => t.type === 'income').reduce((sum, t) => sum + t.amount, 0) || 0;
+      const expense = allTx?.filter(t => t.type === 'expense').reduce((sum, t) => sum + t.amount, 0) || 0;
 
-  // ביצוע ה"העלאה"
-  const handleUpload = (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsUploading(true);
+      setStats({ balance: income - expense, income, expense });
 
-    // סימולציה של העלאה ועדכון שרת
-    setTimeout(() => {
-      setIsUploading(false);
-      setShowSuccess(true);
+      // שליפת פעולות אחרונות
+      const { data: recent } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(20); // הגדלתי ל-20 שיהיה יותר מידע
+
+      if (recent) setRecentTransactions(recent);
       
-      // הסרת הפריט מהרשימה אחרי שניה (כי הוא טופל)
-      setTimeout(() => {
-        setPendingItems(prev => prev.filter(i => i.id !== selectedItem.id));
-        setSelectedItem(null);
-      }, 1500);
-    }, 1500);
+      // שליפת הודעות
+      const { data: msgs } = await supabase
+        .from('messages') 
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(3); 
+      if (msgs) setMessages(msgs);
+
+      setLoading(false);
+    };
+
+    fetchData();
+  }, []);
+
+  const handleLogout = () => {
+    localStorage.clear();
+    router.push('/');
+  };
+
+  // פונקציית עזר לתיאור הפעולה
+  const getTransactionDescription = (t: any) => {
+    if (t.status === 'rejected') {
+       return `נדחה: ${t.rejection_reason || 'לא צוינה סיבה'}`;
+    }
+    if (t.type === 'income') {
+       return `זיכוי עבור: ${t.title}`;
+    }
+    return `תשלום לספק: ${t.title}`;
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 font-sans" dir="rtl">
-      <div className="max-w-2xl mx-auto">
+    <div className="min-h-screen bg-slate-50 font-sans flex" dir="rtl">
+      
+      {/* תפריט צד (מוסתר בנייד) */}
+      <aside className="hidden md:flex flex-col w-64 bg-slate-900 text-white min-h-screen sticky top-0 h-screen p-6 shadow-2xl z-20">
+        <div className="mb-10 flex items-center gap-3">
+           <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center font-bold text-xl">ח</div>
+           <div>
+             <h2 className="font-bold text-lg">חב"ד לנוער</h2>
+             <p className="text-xs text-slate-400">פורטל שליחים</p>
+           </div>
+        </div>
+
+        <nav className="space-y-2 flex-1">
+           <Link href="/dashboard" className="flex items-center gap-3 bg-white/10 text-white p-3 rounded-xl transition-all">
+              <LayoutDashboard size={20} /> <span className="font-bold">לוח בקרה</span>
+           </Link>
+           <Link href="/dashboard/transactions" className="flex items-center gap-3 text-slate-400 hover:text-white hover:bg-white/5 p-3 rounded-xl transition-all">
+              <List size={20} /> <span className="font-medium">היסטוריית פעולות</span>
+           </Link>
+           <Link href="/dashboard/add/income" className="flex items-center gap-3 text-slate-400 hover:text-white hover:bg-white/5 p-3 rounded-xl transition-all">
+              <ArrowDownLeft size={20} /> <span className="font-medium">עדכון הכנסה</span>
+           </Link>
+           <Link href="/dashboard/add/expense" className="flex items-center gap-3 text-slate-400 hover:text-white hover:bg-white/5 p-3 rounded-xl transition-all">
+              <ArrowUpRight size={20} /> <span className="font-medium">בקשת תשלום</span>
+           </Link>
+        </nav>
+
+        <button onClick={handleLogout} className="flex items-center gap-3 text-red-400 hover:bg-red-900/20 p-3 rounded-xl mt-auto transition-all">
+           <LogOut size={20} /> <span className="font-bold">יציאה</span>
+        </button>
+      </aside>
+
+      {/* תוכן ראשי */}
+      <main className="flex-1 pb-24 md:pb-10">
         
-        {/* כפתור חזרה */}
-        <Link href="/dashboard" className="inline-flex items-center gap-2 text-slate-500 hover:text-slate-800 mb-6 transition-colors">
-          <ArrowRight size={20} />
-          חזרה ללוח הבקרה
-        </Link>
-
         {/* כותרת */}
-        <div className="flex items-center justify-between mb-6">
+        <header className="bg-white p-6 md:p-8 shadow-sm border-b border-slate-100 flex justify-between items-center sticky top-0 z-10 md:static">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">השלמת קבלות</h1>
-            <p className="text-slate-500 text-sm">יש להעלות קבלות עבור ההוצאות הבאות</p>
+            <h1 className="text-xl md:text-2xl font-black text-slate-800">היי, {userName.split(' ')[0]} 👋</h1>
+            <p className="text-slate-400 text-xs md:text-sm font-medium">יתרה נוכחית: ₪{stats.balance.toLocaleString()}</p>
           </div>
-          <div className="bg-purple-100 text-purple-700 px-3 py-1 rounded-full text-sm font-bold">
-            {pendingItems.length} ממתינים
+          <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center text-slate-500 border border-slate-200">
+             <User size={20} />
+          </div>
+        </header>
+
+        <div className="p-5 md:p-8 max-w-7xl mx-auto space-y-8">
+
+          {/* כרטיסי מידע למובייל ולדסקטופ */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+             <div className="bg-slate-900 text-white p-6 rounded-[2rem] shadow-xl relative overflow-hidden">
+                <span className="text-slate-300 text-sm font-medium mb-1 block">יתרה זמינה</span>
+                <div className="text-5xl font-black tracking-tight my-2">
+                   ₪{stats.balance.toLocaleString()}
+                </div>
+             </div>
+             
+             {/* כפתורים מהירים למובייל */}
+             <div className="md:hidden grid grid-cols-2 gap-4">
+                <Link href="/dashboard/add/income" className="bg-white p-4 rounded-2xl border shadow-sm flex flex-col items-center gap-2">
+                   <div className="w-10 h-10 bg-green-100 text-green-600 rounded-full flex items-center justify-center"><ArrowDownLeft /></div>
+                   <span className="font-bold text-sm">הוסף הכנסה</span>
+                </Link>
+                <Link href="/dashboard/add/expense" className="bg-white p-4 rounded-2xl border shadow-sm flex flex-col items-center gap-2">
+                   <div className="w-10 h-10 bg-red-100 text-red-600 rounded-full flex items-center justify-center"><ArrowUpRight /></div>
+                   <span className="font-bold text-sm">הוסף הוצאה</span>
+                </Link>
+             </div>
+          </div>
+
+          {/* רשימת פעולות משופרת (סעיפים 1+2) */}
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-sm p-6">
+             <h2 className="text-xl font-bold text-slate-800 mb-6">פעולות אחרונות</h2>
+
+             {loading ? <div className="text-center py-10">טוען...</div> : recentTransactions.length === 0 ? (
+                <div className="text-center py-10 text-slate-400">אין פעולות עדיין</div>
+             ) : (
+                <div className="space-y-4">
+                   {recentTransactions.map((t) => (
+                      <div key={t.id} className={`p-4 rounded-2xl border flex flex-col gap-2 transition-all ${t.status === 'rejected' ? 'bg-red-50 border-red-100' : 'bg-white border-slate-100 hover:border-slate-300'}`}>
+                         
+                         <div className="flex justify-between items-start">
+                            <div className="flex gap-3 items-center">
+                               <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
+                                  t.status === 'rejected' ? 'bg-red-200 text-red-700' :
+                                  t.type === 'income' ? 'bg-green-100 text-green-600' : 'bg-red-100 text-red-600'
+                               }`}>
+                                  {t.status === 'rejected' ? <XCircle size={20}/> : (t.type === 'income' ? <ArrowDownLeft size={20}/> : <ArrowUpRight size={20}/>)}
+                               </div>
+                               <div>
+                                  <div className="font-bold text-slate-900 text-sm md:text-base">
+                                     {/* תיקון סעיף 1: כותרת ברורה עם סוג הפעולה */}
+                                     {t.status === 'rejected' ? 'הבקשה נדחתה' : t.title}
+                                  </div>
+                                  <div className="text-xs text-slate-500">
+                                     {new Date(t.date).toLocaleDateString('he-IL')} • {t.status === 'pending' ? 'ממתין לאישור' : (t.status === 'approved' ? 'אושר' : 'נדחה')}
+                                  </div>
+                               </div>
+                            </div>
+                            <div className={`text-lg font-black ${t.type === 'income' ? 'text-green-600' : 'text-red-600'} ${t.status === 'rejected' ? 'line-through opacity-50' : ''}`}>
+                               {t.type === 'income' ? '+' : '-'}₪{t.amount.toLocaleString()}
+                            </div>
+                         </div>
+
+                         {/* תיקון סעיף 1 ו-2: פירוט מלא של הסיבה/הסוג */}
+                         <div className="bg-white/50 p-2 rounded-lg text-sm text-slate-700 mt-1">
+                            {getTransactionDescription(t)}
+                         </div>
+
+                      </div>
+                   ))}
+                </div>
+             )}
           </div>
         </div>
+      </main>
 
-        {/* רשימת המשימות */}
-        <div className="space-y-4">
-          {pendingItems.length === 0 ? (
-            // מצב ריק - הכל הושלם
-            <div className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200">
-              <div className="w-16 h-16 bg-green-50 text-green-500 rounded-full flex items-center justify-center mx-auto mb-4">
-                <CheckCircle size={32} />
-              </div>
-              <h3 className="text-lg font-bold text-slate-800">הכל מעולה!</h3>
-              <p className="text-slate-500">אין קבלות שצריך להשלים כרגע.</p>
-              <Link href="/dashboard" className="mt-4 inline-block text-blue-600 font-bold text-sm hover:underline">
-                חזור לדף הבית
-              </Link>
-            </div>
-          ) : (
-            // רשימת פריטים
-            pendingItems.map((item) => (
-              <div key={item.id} className="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 flex items-center justify-between group hover:border-purple-200 transition-all">
-                
-                <div className="flex items-center gap-4">
-                  <div className="bg-purple-50 text-purple-600 w-12 h-12 rounded-xl flex items-center justify-center shrink-0">
-                    <Receipt size={24} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-slate-800">{item.supplier}</h3>
-                    <p className="text-sm text-slate-500">{item.title}</p>
-                    <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
-                      <span className="flex items-center gap-1">
-                        <Calendar size={12} /> {item.date}
-                      </span>
-                      <span className="flex items-center gap-1 text-purple-600 font-medium bg-purple-50 px-1.5 rounded">
-                        <AlertCircle size={10} /> חסרה קבלה
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="text-left">
-                  <div className="font-bold text-lg text-slate-900 mb-1">₪{item.amount}</div>
-                  <button 
-                    onClick={() => handleOpenUpload(item)}
-                    className="bg-slate-900 hover:bg-purple-600 text-white text-xs px-4 py-2 rounded-lg transition-colors font-medium shadow-lg shadow-slate-200"
-                  >
-                    העלה קבלה
-                  </button>
-                </div>
-
-              </div>
-            ))
-          )}
-        </div>
-
+      {/* תפריט תחתון למובייל */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t py-3 px-6 flex justify-between z-50">
+         <Link href="/dashboard" className="text-blue-600 flex flex-col items-center"><Home size={24}/><span className="text-[10px]">בית</span></Link>
+         <div className="-mt-8"><Link href="/dashboard/add/income" className="bg-slate-900 text-white p-4 rounded-full shadow-lg block"><Plus size={28}/></Link></div>
+         <Link href="/dashboard/transactions" className="text-slate-400 flex flex-col items-center"><List size={24}/><span className="text-[10px]">פעולות</span></Link>
       </div>
-
-      {/* מודל העלאה (Popup) */}
-      {selectedItem && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center sm:p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md rounded-t-3xl sm:rounded-3xl overflow-hidden animate-in slide-in-from-bottom-10 duration-300">
-            
-            {!showSuccess ? (
-              // טופס העלאה
-              <form onSubmit={handleUpload} className="p-6">
-                <div className="flex justify-between items-start mb-6">
-                  <div>
-                    <h2 className="text-xl font-bold text-slate-900">העלאת קבלה</h2>
-                    <p className="text-sm text-slate-500">{selectedItem.title}</p>
-                  </div>
-                  <button type="button" onClick={handleClose} className="p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors">
-                    <X size={20} className="text-slate-500" />
-                  </button>
-                </div>
-
-                <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 mb-6 flex justify-between items-center">
-                   <div>
-                      <p className="text-xs text-slate-400">ספק</p>
-                      <p className="font-bold text-slate-800">{selectedItem.supplier}</p>
-                   </div>
-                   <div className="text-left">
-                      <p className="text-xs text-slate-400">סכום</p>
-                      <p className="font-bold text-slate-800">₪{selectedItem.amount}</p>
-                   </div>
-                </div>
-
-                <div className="border-2 border-dashed border-purple-200 bg-purple-50/50 rounded-2xl p-8 text-center cursor-pointer hover:bg-purple-50 transition-colors mb-6 group">
-                   <div className="bg-white w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-3 shadow-sm text-purple-600 group-hover:scale-110 transition-transform">
-                      <UploadCloud size={24} />
-                   </div>
-                   <p className="font-bold text-purple-900">לחץ לבחירת קובץ</p>
-                   <p className="text-xs text-purple-400 mt-1">תמונה או PDF עד 5MB</p>
-                </div>
-
-                <button 
-                  type="submit" 
-                  disabled={isUploading}
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-4 rounded-xl shadow-lg shadow-purple-600/20 transition-all active:scale-95 flex items-center justify-center gap-2"
-                >
-                  {isUploading ? "מעלה קובץ..." : "שמור וסיים"}
-                </button>
-              </form>
-            ) : (
-              // מסך הצלחה
-              <div className="p-12 text-center flex flex-col items-center">
-                <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-4 animate-in zoom-in duration-300">
-                  <CheckCircle className="text-green-600 w-10 h-10" />
-                </div>
-                <h2 className="text-2xl font-bold text-slate-900 mb-2">מעולה!</h2>
-                <p className="text-slate-500">הקבלה נקלטה בהצלחה והמשימה הושלמה.</p>
-              </div>
-            )}
-            
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }
